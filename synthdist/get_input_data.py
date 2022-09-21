@@ -102,7 +102,7 @@ def get_roads(homes):
     
     # Get the OSM links within the county polygon
     osm_graph = ox.graph_from_polygon(bound_polygon, retain_all=True,
-                                  truncate_by_edge=True)
+                                  truncate_by_edge=False)
     
     # Add geometries for links without it
     edge_nogeom = [e for e in osm_graph.edges(keys=True) \
@@ -119,4 +119,4 @@ def get_roads(homes):
 
 df = load_homes("test-homes")
 homes = get_homes(df)
-
+roads = get_roads(homes)
