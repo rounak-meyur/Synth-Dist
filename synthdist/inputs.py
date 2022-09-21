@@ -114,9 +114,3 @@ def get_roads(homes):
         osm_graph.edges[e]['geometry'] = link_geom
     
     return osm_graph
-
-
-
-df = load_homes("test-homes")
-homes = get_homes(df)
-roads = get_roads(homes)
