@@ -9,12 +9,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-from inputs import load_homes, get_homes, get_roads
+from inputs import load_homes, get_roads
 from mapping import map_home_to_road
 
 
-df = load_homes("test-homes")
-homes = get_homes(df)
+homes = load_homes("test-homes")
 roads = get_roads(homes)
 
 H2L = map_home_to_road(homes,roads)

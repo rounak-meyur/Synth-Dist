@@ -18,7 +18,7 @@ from params import DATA_PATHS
 
 
 
-def load_homes(filename: str) -> pd.DataFrame:
+def load_homes(filename: str) -> nt:
     """
     Gets residence data from the file
 
@@ -29,35 +29,18 @@ def load_homes(filename: str) -> pd.DataFrame:
 
     Returns
     -------
-    df : pd.DataFrame
-        Dataframe containing the residence hourly energy consumption data.
+    nt
+        named tuple of residential data with location, average and peak demands.
 
     """
     data_dir = DATA_PATHS["load"]
     data_dir.mkdir(exist_ok=True)
     if (data_dir / f"{filename}.csv").exists():
-        df = pd.read_csv(data_dir / f"{filename}.csv")
+        df_home = pd.read_csv(data_dir / f"{filename}.csv")
         
     else:
         logger.error("File f{filename}.csv not present!!!")
     
-    return df
-
-def get_homes(df_home : pd.DataFrame) -> nt:
-    """
-    Prepares the residential data for the synthetic network creation process
-
-    Parameters
-    ----------
-    df_home : pd.DataFrame
-        pandas dataframe for the input residential load usage data.
-
-    Returns
-    -------
-    nt
-        named tuple of residential data with location, average and peak demands.
-
-    """
     df_home['average'] = pd.Series(np.mean(df_home.iloc[:,3:27].values,axis=1))
     df_home['peak'] = pd.Series(np.max(df_home.iloc[:,3:27].values,axis=1))
     
@@ -66,7 +49,7 @@ def get_homes(df_home : pd.DataFrame) -> nt:
     dict_cord = df_home.iloc[:,0:3].set_index('hid').T.to_dict('list')
     dict_peak = dict(zip(df_home.hid,df_home.peak))
     dict_avg = dict(zip(df_home.hid,df_home.average))
-    return home(cord=dict_cord,profile=dict_load,peak=dict_peak,average=dict_avg)
+    return home(cord=dict_cord,profile=dict_load,peak=dict_peak,average=dict_avg)   
     
 
 def load_substations(columns: list = ["ID","LATITUDE","LONGITUDE"]) -> pd.DataFrame:
