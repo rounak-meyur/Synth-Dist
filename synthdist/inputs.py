@@ -5,6 +5,7 @@ Created on Tue Sep 20 13:11:06 2022
 Author: Rounak Meyur
 """
 
+import os
 import logging
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ from params import DATA_PATHS
 
 
 
-def load_homes(filename: str) -> nt:
+def load_homes(filepath: str) -> nt:
     """
     Gets residence data from the file
 
@@ -33,13 +34,12 @@ def load_homes(filename: str) -> nt:
         named tuple of residential data with location, average and peak demands.
 
     """
-    data_dir = DATA_PATHS["load"]
-    data_dir.mkdir(exist_ok=True)
-    if (data_dir / f"{filename}.csv").exists():
-        df_home = pd.read_csv(data_dir / f"{filename}.csv")
+    if os.path.exists(f"{filepath}.csv"):
+        df_home = pd.read_csv(f"{filepath}.csv")
         
     else:
-        logger.error("File f{filename}.csv not present!!!")
+        logger.error(f"File {filepath}.csv not present!!!")
+        raise ValueError(f"{filepath}.csv doesn't exist!")
     
     df_home['average'] = pd.Series(np.mean(df_home.iloc[:,3:27].values,axis=1))
     df_home['peak'] = pd.Series(np.max(df_home.iloc[:,3:27].values,axis=1))
