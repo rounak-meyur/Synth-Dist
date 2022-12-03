@@ -8,24 +8,21 @@ Author: Rounak Meyur
 import logging
 logger = logging.getLogger(__name__)
 
-from collections import namedtuple as nt
 from collections import defaultdict
-import networkx as nx
-import osmnx as ox
 from pyqtree import Index
 from shapely.geometry import Point
 
-def map_home_to_road(homes : nt, road : nx.MultiDiGraph) -> dict:
-    H2Link = {}
-    for h in homes.cord:
-        point = (homes.cord[h][1],homes.cord[h][0])
-        H2Link[h] = ox.distance.get_nearest_edge(road,point)
+def map_home_to_road(homes, road, to_filepath=None):
+    M = MapOSM(road)
+    H2Link = M.map_point(homes)
     
-    # near_edges = ox.distance.get_nearest_edges(road, X, Y, dist=0.001)
-    # H2Link = {h:near_edges[i] for i,h in enumerate(homes.cord)}
-    
-    # M = MapOSM(road)
-    # H2Link = M.map_point(homes)
+    # write the mapping in a txt file
+    if to_filepath:
+        data_map = '\n'.join(
+            [' '.join([str(h),str(H2Link[h][0]),str(H2Link[h][1]),
+                       str(H2Link[h][2])]) for h in H2Link])
+        with open(to_filepath,'w') as f:
+            f.write(data_map)
     
     return H2Link
 
@@ -105,7 +102,7 @@ class MapOSM:
         
         return Map2Link
 
-def groups(many_to_one : dict) -> dict:
+def reverse_map(many_to_one, to_filepath = None):
     """
     Converts a many-to-one mapping into a one-to-many mapping.
     
@@ -125,4 +122,13 @@ def groups(many_to_one : dict) -> dict:
     for v, k in many_to_one.items():
         one_to_many[k].add(v)
     D = dict(one_to_many)
-    return {k:list(D[k]) for k in D}
+    output_dict = {k:list(D[k]) for k in D}
+    
+    if to_filepath:
+        data_map = '\n'.join([' '.join([str(i) for i in list(r)] +\
+                                       [str(h) for h in output_dict[r]]) \
+                            for r in output_dict if len(output_dict[r]) > 0])
+        with open(to_filepath,'w') as f:
+            f.write(data_map)
+        
+    return output_dict
