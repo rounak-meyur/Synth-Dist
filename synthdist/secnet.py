@@ -221,19 +221,91 @@ def secnet_milp(graph, path, **kwargs):
     
     return forest
 
-def data_secnet(forest, link, start_count):
+# def data_secnet(forest, link, linkgeom, counter, path):
+def data_secnet(forest, link, linkgeom, counter, filepath, **kwargs):
+    # Relabel the transformer IDs
+    replace_ID = {}
+    tnodes = sorted([n for n in forest if forest.nodes[n]["label"] == 'T'])
+    for n in tnodes:
+        replace_ID[n] = counter
+        counter += 1
+    nx.relabel_nodes(forest, replace_ID, copy=False)
+    
+    # Get the transformer nodes and leaf nodes
     tnodes = [n for n in forest if forest.nodes[n]['label']=='T']
-    t_data = []
-    count = start_count
-    for i,t in enumerate(tnodes):
-        t_id = start_count + i
+    lnodes = [n for n in forest if nx.degree(forest,n)==1 \
+              and forest.nodes[n]['label']=='H']
+    
+    # Store the transformer data
+    t_data = ""
+    for t in tnodes:
         cord = list(forest.nodes[t]['cord'])
         homes = list(nx.descendants(forest, t))
         load = sum([forest.nodes[h]['load'] for h in homes])
         
         # Data record for transformers
-        t_data.append(' '.join([str(x) for x in [t_id, load] + cord]))
-    return
+        t_data += " ".join([str(x) for x in [t, load] + cord]) + "\n"
+    
+    # Store the secondary network branches
+    secnet_data = ""
+    for leaf in lnodes:
+        for tsfr in tnodes:
+            if nx.has_path(forest, leaf, tsfr):
+                secnet_data += " ".join(
+                    [str(x) for x in nx.shortest_path(
+                        forest, leaf, tsfr)[::-1]]) + "\n"
+    
+    # Store the road and transformer node connections
+    road_cords = list(linkgeom.coords)
+    road_cord1 = road_cords[0]
+    road_cord2 = road_cords[-1]
+    nodes = [start]+tnodes+[end]
+    
+    # Write the data
+    mode = kwargs.get("write_mode", "a")
+    with open(f"{filepath}-transformers.txt", mode) as f:
+        f.write(t_data)
+    with open(f"{filepath}-secondary.txt", mode) as f:
+        f.write(secnet_data)
+    return counter
+
+
+def get_transformer_net(link, linkgeom):
+    edgelist = []
+    road_cords = list(linkgeom.coords)
+    road_cord1 = road_cords[0]
+    road_cord2 = road_cords[-1]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

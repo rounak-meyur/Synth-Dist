@@ -86,12 +86,11 @@ class Link(LineString):
             List of point objects denoting the interpolated points.
 
         """
-        points = []
-        length = self.geod_length()
-        for i in np.arange(0,length,sep):
-            x,y = self.interpolate(i/length,normalized=True).xy
-            xy = (x[0],y[0])
-            points.append(Point(xy))
-        if len(points)==0: 
-            points.append(Point((self.xy[0][0],self.xy[1][0])))
+        num_vert = int(round(self.geod_length() / sep))
+        if num_vert == 0:
+            num_vert = 1
+        geom_interpolated = LineString(
+            [self.interpolate(float(n) / num_vert, normalized=True)\
+             for n in range(num_vert + 1)])
+        points = [Point(pt) for pt in geom_interpolated.coords]
         return points
