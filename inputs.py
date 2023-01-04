@@ -6,19 +6,12 @@ Author: Rounak Meyur
 """
 
 import os
-import logging
-logger = logging.getLogger(__name__)
-
 from shapely.geometry import Point, LineString, MultiPoint
 import pandas as pd
 import numpy as np
 from collections import namedtuple as nt
 import osmnx as ox
 import networkx as nx
-
-from params import DATA_PATHS
-
-
 
 def load_homes(filepath: str) -> nt:
     """

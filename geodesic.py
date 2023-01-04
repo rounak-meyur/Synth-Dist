@@ -4,11 +4,7 @@ Created on Tue Sep 20 15:52:37 2022
 
 Author: Rounak Meyur
 """
-
-import logging
 from typing import Union
-logger = logging.getLogger(__name__)
-
 from shapely.geometry import Point, LineString
 from geographiclib.geodesic import Geodesic
 import numpy as np

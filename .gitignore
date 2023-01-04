@@ -1,4 +1,4 @@
 __pycache__
 cache
 gurobi
-.vs
+tests/__pycache__

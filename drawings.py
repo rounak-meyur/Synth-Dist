@@ -9,8 +9,6 @@ from shapely.geometry import Point, LineString
 import geopandas as gpd
 
 
-
-
 def plot_roads(roads, ax, **kwargs):
     # ------ parameters for plot ------
     nodecolor = kwargs.get("nodecolor", 'black')

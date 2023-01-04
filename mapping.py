@@ -5,9 +5,6 @@ Created on Wed Sep 21 12:40:23 2022
 Author: Rounak Meyur
 """
 
-import logging
-logger = logging.getLogger(__name__)
-
 from collections import defaultdict
 from pyqtree import Index
 from shapely.geometry import Point
