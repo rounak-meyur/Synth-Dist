@@ -14,17 +14,12 @@ warnings.filterwarnings("ignore")
 
 
 import os
-import unittest
 import matplotlib
 import matplotlib.pyplot as plt
 from timeit import default_timer as timer
 from tqdm import tqdm
 
-import csv
-import pandas as pd
-import networkx as nx
-from shapely.geometry import Point, MultiPoint, LineString, base as sg
-from collections import namedtuple as nt
+
 
 
 from inputs import load_homes, get_roads, read_roads_from_gpickle
@@ -74,14 +69,13 @@ def timeit(f, *args, **kwargs):
 
 
 
-class SynthDist(unittest.TestCase):
-    def __init__(self, methodName: str = ...) -> None:
-        super().__init__(methodName)
-        self.home_path = "../data/load"
+class SynthDist():
+    def __init__(self) -> None:
+        self.home_path = "./data/load"
         
-        self._out_dir = "../out"
-        self._fig_dir = "../figs"
-        self._grb_dir = "../gurobi"
+        self._out_dir = "./out"
+        self._fig_dir = "./figs"
+        self._grb_dir = "./gurobi"
         self.state_ID = 51
         self.fis = "test"
         pass
@@ -233,7 +227,11 @@ class SynthDist(unittest.TestCase):
         for k, link in tqdm(enumerate(map_r2h), 
                             ncols = 100,
                             desc = "Created secondary network"):
-            linkgeom = roads.edges[link]['geometry']
+            
+            try:
+                linkgeom = roads.edges[link]['geometry']
+            except:
+                linkgeom = roads.edges[(link[1],link[0],link[2])]['geometry']
             homelist = map_r2h[link]
             dict_homes = {h:{'cord': homes.cord[h], 
                               'load': homes.load[h]} for h in homelist}
@@ -247,7 +245,7 @@ class SynthDist(unittest.TestCase):
                 counter = int(f"{self.state_ID}500500000")
             else:
                 counter = int(f"{self.state_ID}{self.fis}500000")
-            counter = data_secnet(secnet, counter, 
+            counter = data_secnet(secnet, link, linkgeom, counter, 
                                      f"{self.out_dir}/{self.fis}")
             
             
@@ -364,16 +362,16 @@ class SynthDist(unittest.TestCase):
 
 
 
-class SynthDist_Montgomery(SynthDist):
+# class SynthDist_Montgomery(SynthDist):
     
     
-    def __init__(self, methodName:str = ...) -> None:
-        super().__init__(methodName)
-        self.out_dir = "../out/test"
-        self.fig_dir = "../figs/test"
-        self.grb_dir = "../gurobi/test"
-        self.fis = "test"
-        return
+#     def __init__(self, methodName:str = ...) -> None:
+#         super().__init__(methodName)
+#         self.out_dir = "./out/test"
+#         self.fig_dir = "./figs/test"
+#         self.grb_dir = "./gurobi/test"
+#         self.fis = "test"
+#         return
     
     # def test_input(self):
     #     # Get the homes and roads
@@ -411,52 +409,52 @@ class SynthDist_Montgomery(SynthDist):
     #     pass
     
     
-    def test_create_secnet_link(self):
-        map_r2h = self.read_reverse_map()
-        self.assertIsNotNone(map_r2h)
+    # def test_create_secnet_link(self):
+    #     map_r2h = self.read_reverse_map()
+    #     self.assertIsNotNone(map_r2h)
         
-        # get the homes and roads
-        homes = self.read_homes()
-        roads = self.read_roads()
-        self.assertIsNotNone(homes)
-        self.assertIsNotNone(roads)
+    #     # get the homes and roads
+    #     homes = self.read_homes()
+    #     roads = self.read_roads()
+    #     self.assertIsNotNone(homes)
+    #     self.assertIsNotNone(roads)
         
-        # Choose an example link
-        link = [r for r in map_r2h if 10 < len(map_r2h[r]) < 20][10]
-        linkgeom = roads.edges[link]['geometry']
-        link_index = list(map_r2h.keys()).index(link)
-        homelist = map_r2h[link]
-        dict_homes = {h:{'cord': homes.cord[h], 
-                          'load': homes.load[h]} for h in homelist}
+    #     # Choose an example link
+    #     link = [r for r in map_r2h if 10 < len(map_r2h[r]) < 20][10]
+    #     linkgeom = roads.edges[link]['geometry']
+    #     link_index = list(map_r2h.keys()).index(link)
+    #     homelist = map_r2h[link]
+    #     dict_homes = {h:{'cord': homes.cord[h], 
+    #                       'load': homes.load[h]} for h in homelist}
         
-        # Generate the candidate graph
-        cand_graph = self.get_candidate_graph(linkgeom, dict_homes)
-        self.assertIsNotNone(cand_graph)
+    #     # Generate the candidate graph
+    #     cand_graph = self.get_candidate_graph(linkgeom, dict_homes)
+    #     self.assertIsNotNone(cand_graph)
         
-        # Solve the optimization problem
-        temp_path=f"{self.grb_dir}/{link_index}"
-        secnet = self.get_secnet_link(
-            cand_graph, temp_path
-            )
-        self.assertIsNotNone(secnet)
+    #     # Solve the optimization problem
+    #     temp_path=f"{self.grb_dir}/{link_index}"
+    #     secnet = self.get_secnet_link(
+    #         cand_graph, temp_path
+    #         )
+    #     self.assertIsNotNone(secnet)
         
-        if isinstance(self.fis, str):
-            counter = int(f"{self.state_ID}500500000")
-        else:
-            counter = int(f"{self.state_ID}{self.fis}500000")
-        counter = data_secnet(secnet, link, linkgeom, counter, 
-                                 f"{self.out_dir}/{self.fis}",
-                                 write_mode="w")
+    #     if isinstance(self.fis, str):
+    #         counter = int(f"{self.state_ID}500500000")
+    #     else:
+    #         counter = int(f"{self.state_ID}{self.fis}500000")
+    #     counter = data_secnet(secnet, link, linkgeom, counter, 
+    #                               f"{self.out_dir}/{self.fis}",
+    #                               write_mode="w")
         
-        # Plot the candidate graph
-        self.plot_secnet_results(
-            secnet, linkgeom, candidate_graph=cand_graph,
-            plot_list = ["input", "candidate", "output"],
-            suptitle_sfx = "input, candidate and output",
-            file_name_sfx = "input_candidate_output",
-            figsize = (50,20),
-            )
-        pass
+    #     # Plot the candidate graph
+    #     self.plot_secnet_results(
+    #         secnet, linkgeom, candidate_graph=cand_graph,
+    #         plot_list = ["input", "candidate", "output"],
+    #         suptitle_sfx = "input, candidate and output",
+    #         file_name_sfx = "input_candidate_output",
+    #         figsize = (50,20),
+    #         )
+    #     pass
     
     # def test_create_secnet_region(self):
     #     map_r2h = self.read_reverse_map()
@@ -477,6 +475,33 @@ class SynthDist_Montgomery(SynthDist):
 
 
 
+# if __name__ == '__main__':
+#     unittest.main()
+
+
+
+
+fx = SynthDist()
+fx.out_dir = "./out/test"
+fx.fig_dir = "./figs/test"
+fx.grb_dir = "./gurobi/test"
+fx.fis = "test"
+
+homes,roads = fx.read_inputs()
+
+map_h2r = fx.map_inputs(
+    homes=homes, 
+    roads=roads,
+    to_file = f"{fx.fis}-map_h2r.txt"
+    )
+
+
+map_r2h = fx.get_reverse_map(
+    map_file = "test-map_h2r.txt",
+    to_file = "test-map_r2h.txt"
+    )
+
+fx.get_secnet_region(map_r2h, homes, roads)
 
 
 
@@ -502,5 +527,9 @@ class SynthDist_Montgomery(SynthDist):
 
 
 
-if __name__ == '__main__':
-    unittest.main()
+
+
+
+
+
+

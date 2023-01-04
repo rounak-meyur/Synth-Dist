@@ -1,3 +1,4 @@
-synthdist/__pycache__
-synthdist/cache
+__pycache__
+cache
 gurobi
+.vs

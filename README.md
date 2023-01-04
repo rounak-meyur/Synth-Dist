@@ -1,1 +1,1 @@
-# synth-dist
+## Synthetic Distribution Creation Framework

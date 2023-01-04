@@ -9,7 +9,7 @@ import sys
 import gurobipy as grb
 import networkx as nx
 import numpy as np
-from geodesic import Link, geodist
+from geodesic import geodist, interpolate
 from shapely.geometry import LinearRing
 from scipy.spatial import Delaunay
 from itertools import combinations
@@ -36,7 +36,7 @@ def candidate(linkgeom, homes, **kwargs):
     heuristic = kwargs.get("heuristic", None)
     
     # Interpolate points along link for probable transformer locations
-    interpolated_points = Link(linkgeom).interpolate_points(sep)
+    interpolated_points = interpolate(linkgeom, sep)
     prob_tsfr = {i:pt for i,pt in enumerate(interpolated_points)}
     
     # Identify which side of road each home is located
@@ -259,7 +259,8 @@ def data_secnet(forest, link, linkgeom, counter, filepath, **kwargs):
     road_cords = list(linkgeom.coords)
     road_cord1 = road_cords[0]
     road_cord2 = road_cords[-1]
-    nodes = [start]+tnodes+[end]
+    nodes = [road_cord1]+tnodes+[road_cord2]
+    connect_data = ' '.join([str(x) for x in nodes]) + "\n"
     
     # Write the data
     mode = kwargs.get("write_mode", "a")
@@ -267,45 +268,8 @@ def data_secnet(forest, link, linkgeom, counter, filepath, **kwargs):
         f.write(t_data)
     with open(f"{filepath}-secondary.txt", mode) as f:
         f.write(secnet_data)
+    with open(f"{filepath}-connection.txt", mode) as f:
+        f.write(connect_data)
     return counter
-
-
-def get_transformer_net(link, linkgeom):
-    edgelist = []
-    road_cords = list(linkgeom.coords)
-    road_cord1 = road_cords[0]
-    road_cord2 = road_cords[-1]
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
