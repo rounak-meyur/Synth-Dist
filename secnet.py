@@ -5,6 +5,12 @@ Created on Tue Nov 29 16:37:38 2022
 Author: Rounak Meyur
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.StreamHandler())
+logger.setLevel(logging.DEBUG)
+
 import sys
 import gurobipy as grb
 import networkx as nx

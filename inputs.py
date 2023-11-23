@@ -4,6 +4,11 @@ Created on Tue Sep 20 13:11:06 2022
 
 Author: Rounak Meyur
 """
+import logging
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.StreamHandler())
+logger.setLevel(logging.DEBUG)
 
 import os
 from shapely.geometry import Point, LineString, MultiPoint
@@ -30,18 +35,22 @@ def load_homes(filepath: str) -> nt:
     """
     if os.path.exists(f"{filepath}.csv"):
         df_home = pd.read_csv(f"{filepath}.csv")
+        logger.info("Opening CSV file with residences and load profiles")
         
     else:
+        logger.error("CSV file with residence load profiles not found")
         raise ValueError(f"{filepath}.csv doesn't exist!")
     
     df_home['average'] = pd.Series(np.mean(df_home.iloc[:,3:27].values,axis=1))
     df_home['peak'] = pd.Series(np.max(df_home.iloc[:,3:27].values,axis=1))
     
-    home = nt("home",field_names=["cord","profile","peak","load"])
+    home = nt("HOME",field_names=["cord","profile","peak","load"])
     dict_load = df_home.iloc[:,[0]+list(range(3,27))].set_index('hid').T.to_dict('list')
     dict_cord = df_home.iloc[:,0:3].set_index('hid').T.to_dict('list')
     dict_peak = dict(zip(df_home.hid,df_home.peak))
     dict_avg = dict(zip(df_home.hid,df_home.average))
+    
+    logger.info("Created named tuple 'HOME' with residence location and load profile")
     return home(cord=dict_cord,profile=dict_load,peak=dict_peak,load=dict_avg)   
     
 

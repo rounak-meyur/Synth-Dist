@@ -5,7 +5,6 @@ Created on Wed Sep 21 12:42:22 2022
 Author: Rounak Meyur
 """
 
-import logging
 
 import os
 import matplotlib
@@ -62,9 +61,8 @@ def timeit(f, *args, **kwargs):
 
 
 
-class SynthDist(unittest.TestCase):
-    def __init__(self, methodName: str = ...) -> None:
-        super().__init__(methodName)
+class SynthDist():
+    def __init__(self) -> None:
         self.home_path = "./data/load"
         
         self._out_dir = "./out"
@@ -351,132 +349,3 @@ class SynthDist(unittest.TestCase):
         if do_return:
             return fig, ax
         pass
-    
-    
-    
-
-
-
-class test_synthdist_input(SynthDist):
-    def __init__(self, methodName:str = ...) -> None:
-        super().__init__(methodName)
-        self.out_dir = "./out/test"
-        self.fig_dir = "./figs/test"
-        self.grb_dir = "./gurobi/test"
-        self.fis = "test"
-        return
-    
-    def test_input(self):
-        # Get the homes and roads
-        homes,roads = self.read_inputs()
-        
-        # check if function returns properly
-        self.assertIsNotNone(homes)
-        self.assertIsNotNone(homes.cord)
-        self.assertIsNotNone(homes.profile)
-        self.assertIsNotNone(homes.load)
-        self.assertIsNotNone(homes.peak)
-        self.assertIsNotNone(roads)
-        
-        # Plot the input data
-        self.plot_input_data(
-            roads, homes, 
-            suptitle_sfx = "homes and roads in the geographic region",
-            file_name_sfx = "inputs",
-            )
-        pass
-
-class test_synthdist_mapping(SynthDist):
-    def __init__(self, methodName:str = ...) -> None:
-        super().__init__(methodName)
-        self.out_dir = "./out/test"
-        self.fig_dir = "./figs/test"
-        self.grb_dir = "./gurobi/test"
-        self.fis = "test"
-        return
-    
-    def test_map_inputs(self):
-        homes, roads = self.read_inputs()
-        map_h2r = self.map_inputs(
-            homes=homes, 
-            roads=roads,
-            to_file = f"{self.fis}-map_h2r.txt"
-            )
-        self.assertIsNotNone(map_h2r)
-        
-        pass
-
-    def test_reverse_map(self):
-        map_r2h = self.get_reverse_map(
-            map_file = "test-map_h2r.txt",
-            to_file = "test-map_r2h.txt")
-        
-        self.assertIsNotNone(map_r2h)
-        pass
-    
-    
-    def test_create_secnet_link(self):
-        map_r2h = self.read_reverse_map()
-        self.assertIsNotNone(map_r2h)
-        
-        # get the homes and roads
-        homes = self.read_homes()
-        roads = self.read_roads()
-        self.assertIsNotNone(homes)
-        self.assertIsNotNone(roads)
-        
-        # Choose an example link
-        link = [r for r in map_r2h if 10 < len(map_r2h[r]) < 20][10]
-        linkgeom = roads.edges[link]['geometry']
-        link_index = list(map_r2h.keys()).index(link)
-        homelist = map_r2h[link]
-        dict_homes = {h:{'cord': homes.cord[h], 
-                          'load': homes.load[h]} for h in homelist}
-        
-        # Generate the candidate graph
-        cand_graph = self.get_candidate_graph(linkgeom, dict_homes)
-        self.assertIsNotNone(cand_graph)
-        
-        # Solve the optimization problem
-        temp_path=f"{self.grb_dir}/{link_index}"
-        secnet = self.get_secnet_link(
-            cand_graph, temp_path
-            )
-        self.assertIsNotNone(secnet)
-        
-        if isinstance(self.fis, str):
-            counter = int(f"{self.state_ID}500500000")
-        else:
-            counter = int(f"{self.state_ID}{self.fis}500000")
-        counter = data_secnet(secnet, link, linkgeom, counter, 
-                                  f"{self.out_dir}/{self.fis}",
-                                  write_mode="w")
-        
-        # Plot the candidate graph
-        self.plot_secnet_results(
-            secnet, linkgeom, candidate_graph=cand_graph,
-            plot_list = ["input", "candidate", "output"],
-            suptitle_sfx = "input, candidate and output",
-            file_name_sfx = "input_candidate_output",
-            figsize = (50,20),
-            )
-        pass
-    
-    def test_create_secnet_region(self):
-        map_r2h = self.read_reverse_map()
-        self.assertIsNotNone(map_r2h)
-        
-        # get the homes and roads
-        homes = self.read_homes()
-        roads = self.read_roads()
-        self.assertIsNotNone(homes)
-        self.assertIsNotNone(roads)
-        
-        self.get_secnet_region(map_r2h, homes, roads)
-        pass
-
-
-if __name__ == '__main__':
-    unittest.main()
-
-

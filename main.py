@@ -1,7 +1,16 @@
 import warnings
 warnings.filterwarnings("ignore")
 
-from tests.SynthDistFixture import SynthDist
+import logging
+logging.basicConfig(
+        level=logging.DEBUG, 
+        filename="test.log",
+        format='%(asctime)s %(message)s',
+        # handlers=[logging.StreamHandler()]
+        )
+
+
+from synthdist import SynthDist
 
 fx = SynthDist()
 fx.out_dir = "./out/test"
