@@ -32,7 +32,6 @@ def load_homes(filepath: str) -> nt:
         df_home = pd.read_csv(f"{filepath}.csv")
         
     else:
-        logger.error(f"File {filepath}.csv not present!!!")
         raise ValueError(f"{filepath}.csv doesn't exist!")
     
     df_home['average'] = pd.Series(np.mean(df_home.iloc[:,3:27].values,axis=1))
@@ -46,7 +45,7 @@ def load_homes(filepath: str) -> nt:
     return home(cord=dict_cord,profile=dict_load,peak=dict_peak,load=dict_avg)   
     
 
-def load_substations(columns: list = ["ID","LATITUDE","LONGITUDE"]) -> pd.DataFrame:
+def load_substations(filepath: str, columns: list = ["ID","LATITUDE","LONGITUDE"]) -> pd.DataFrame:
     """
     Load EIA substation data either from file (if it exists) or from the API.
 
@@ -62,13 +61,11 @@ def load_substations(columns: list = ["ID","LATITUDE","LONGITUDE"]) -> pd.DataFr
         Data from substation CSV file.
 
     """
-    data_dir = DATA_PATHS["data"]
-    data_dir.mkdir(exist_ok=True)
-    if (data_dir / "substations.csv").exists():
-        df = pd.read_csv(data_dir / "substations.csv", usecols=columns)
+    if os.path.exists(filepath):
+        df = pd.read_csv(filepath, usecols=columns)
         
     else:
-        logger.error("File substations.csv not present!!!")
+        raise ValueError("File substations.csv not present!!!")
 
     return df
 
@@ -98,7 +95,6 @@ def get_roads(homes, to_filepath=None):
 
 def read_roads_from_gpickle(filepath):
     if not os.path.exists(filepath):
-        logger.error(f"{filepath} not present!!!")
         raise ValueError(f"{filepath} doesn't exist!")
     
     roads = nx.read_gpickle(filepath)
@@ -106,7 +102,6 @@ def read_roads_from_gpickle(filepath):
 
 def load_map(filename):
     if not os.path.exists(filename):
-        logger.error(f"{filename} not present!!!")
         raise ValueError(f"{filename} doesn't exist!")
     else:
         df_map = pd.read_csv(
@@ -120,7 +115,6 @@ def load_map(filename):
 
 def load_reverse_map(filename):
     if not os.path.exists(filename):
-        logger.error(f"{filename} not present!!!")
         raise ValueError(f"{filename} doesn't exist!")
     else:
         with open(filename) as f:

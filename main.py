@@ -1,7 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore")
 
-from SynthDist import SynthDist
+from tests.SynthDistFixture import SynthDist
 
 fx = SynthDist()
 fx.out_dir = "./out/test"
