@@ -1,0 +1,9 @@
+inputs:
+  home_csv: "data/load/test-home-load.csv"
+  substation_csv: "data/substations.csv"
+
+logging:
+  log_file: "logs/application_test.log"
+
+mapping:
+  padding: 0.002

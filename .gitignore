@@ -1,4 +1,9 @@
-__pycache__
+*__pycache__*
+.pytest_cache
 cache
 gurobi
 tests/__pycache__
+logs
+results
+*.png
+*.csv
