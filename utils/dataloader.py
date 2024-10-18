@@ -17,11 +17,13 @@ class Home:
     Represents a home with its location and energy consumption data.
 
     Attributes:
+        id (int): Unique identifier for the home.
         cord (Tuple[float, float]): The coordinates (longitude, latitude) of the home.
         profile (List[float]): The 24-hour energy consumption profile.
         peak (float): The peak energy consumption over the 24-hour period.
         load (float): The average energy consumption over the 24-hour period.
     """
+    id: int
     cord: Tuple[float, float]
     profile: List[float]
     peak: float
@@ -55,12 +57,13 @@ def load_homes(file_path: str) -> List[Home]:
 
     for index, row in df.iterrows():
         try:
+            id = int(row['hid'])
             cord = (float(row['longitude']), float(row['latitude']))
             profile = [float(row[f'hour{i}']) for i in range(1, 25)]
             peak = max(profile)
             load = sum(profile) / 24
 
-            homes.append(Home(cord=cord, profile=profile, peak=peak, load=load))
+            homes.append(Home(id=id, cord=cord, profile=profile, peak=peak, load=load))
         except (KeyError, ValueError) as e:
             logger.error(f"Invalid data format in row {index + 2}: {e}")
             raise ValueError(f"Invalid data format in row {index + 2}: {e}")
