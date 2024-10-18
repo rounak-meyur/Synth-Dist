@@ -1,275 +1,244 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Nov 29 16:37:38 2022
-
-Author: Rounak Meyur
-"""
-
-import sys
-import gurobipy as grb
 import networkx as nx
 import numpy as np
-from geodesic import geodist, interpolate
-from shapely.geometry import LinearRing
+from shapely.geometry import LineString, Point, LinearRing
 from scipy.spatial import Delaunay
-from itertools import combinations
+from geopy.distance import geodesic
+from typing import List, Tuple, Optional, Union
+import cvxpy as cp
+import os
+import sys
 
-def candidate(linkgeom, homes, **kwargs):
+if __name__ == "__main__":
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    sys.path.append(parent_dir)
+
+from utils.dataloader import Home
+from utils.logging_utils import LogManager
+
+if __name__ == "__main__":
+    LogManager.initialize(
+        log_file_path="logs/test_secnet.log", 
+        log_config_path="configs/logging_config.ini"
+    )
+
+logger = LogManager.get_logger("secnet")
+
+
+def create_candidate_network(
+    road_edge_geometry: LineString,
+    mapped_homes: List[Home],
+    nearest_homes: Optional[int] = None,
+    minimum_separation: float = 50.0
+) -> nx.Graph:
     """
-    Creates the base network to carry out the optimization problem. The base graph
-    may be a Delaunay graph or a full graph depending on the size of the problem.
-    
-    Inputs: 
-        linkgeom: shapely geometry of road link.
-        homes: dictionary of residence data
-        sep: minimum separation in meters between the transformers.
-        penalty: penalty factor for crossing the link.
-        heuristic: join transformers to nearest few nodes given by heuristic.
-        Used to create the dummy graph
-    Outputs:graph: the generated base graph also called the dummy graph
-            transformers: list of points along link which are probable locations 
-            of transformers.
+    Create an undirected graph representing the candidate set of edges for the optimal secondary distribution network.
+
+    Args:
+        road_edge_geometry (LineString): The geometry of the road edge.
+        mapped_homes (List[Home]): List of homes mapped to the road edge.
+        nearest_homes (Optional[int]): Minimum number of homes to consider for direct transformer connection.
+        minimum_separation (float): Minimum distance in meters between points on the road edge geometry.
+
+    Returns:
+        nx.Graph: An undirected graph representing the candidate secondary distribution network.
     """
-    # Get the keyword arguments
-    sep = kwargs.get("separation", 50)
-    penalty = kwargs.get("penalty", 0.5)
-    heuristic = kwargs.get("heuristic", None)
-    
-    # Interpolate points along link for probable transformer locations
-    interpolated_points = interpolate(linkgeom, sep)
-    prob_tsfr = {i:pt for i,pt in enumerate(interpolated_points)}
-    
-    # Identify which side of road each home is located
-    link_cords = list(linkgeom.coords)
-    sides = {h:1 if LinearRing(link_cords+[tuple(homes[h]['cord']),
-            link_cords[0]]).is_ccw else -1 for h in homes}
-    
-    # Node attributes
-    homelist = [h for h in homes]
-    cord = {h:homes[h]['cord'] for h in homes}
-    load = {h:homes[h]['load']/1000.0 for h in homes}
-    
-    # Create the base graph
-    graph = nx.Graph()
-    if len(homes)>10:
-        # create a Delaunay graph from the home coordinates
-        points = np.array([cord[h] for h in homes])
-        triangles = Delaunay(points).simplices
-        edgelist = []
-        for t in triangles:
-            edges = [(homelist[t[0]],homelist[t[1]]),
-                     (homelist[t[1]],homelist[t[2]]),
-                     (homelist[t[2]],homelist[t[0]])]
-            edgelist.extend(edges)
-        graph.add_edges_from(edgelist)
-    else:
-        # create a complete graph from the home coordinates
-        edges = combinations(homelist,2)
-        graph.add_edges_from(edges)
-    
-    # Add the new edges
-    if heuristic != None:
-        # select candidate edges between nearby points
-        new_edges = []
-        for t in prob_tsfr:
-            distlist = [geodist(prob_tsfr[t],cord[h]) for h in cord]
-            imphomes = np.array(homelist)[np.argsort(distlist)[:heuristic]]
-            new_edges.extend([(t,n) for n in imphomes])
-    else:
-        # candidate edges from all possible pairs of points
-        new_edges = [(t,n) for t in prob_tsfr for n in homes]
-    graph.add_edges_from(new_edges)
-    
-    # Update the attributes of nodes with transformer attributes
-    for n in graph:
-        if n in prob_tsfr:
-            graph.nodes[n]['cord'] = (prob_tsfr[n].x, prob_tsfr[n].y)
-            graph.nodes[n]['load'] = 0.0
-            graph.nodes[n]['label'] = 'T'
-            sides[n] = 0
+    logger.info(f"Creating candidate network for {len(mapped_homes)} homes")
+
+    # 1. Interpolate points along the road edge geometry
+    probable_transformers = interpolate_points(road_edge_geometry, minimum_separation)
+    logger.info(f"Interpolated {len(probable_transformers)} probable transformer locations")
+
+    # 2. Label homes and probable transformers
+    labeled_points = label_points(road_edge_geometry, mapped_homes, probable_transformers)
+    logger.info("Labeled homes and probable transformers")
+
+    # Create the graph
+    G = nx.Graph()
+
+    # Add nodes to the graph
+    for point, side in labeled_points:
+        if isinstance(point, Home):
+            G.add_node(point.id, cord=point.cord, load=point.load, label='H', side=side)
         else:
-            graph.nodes[n]['cord'] = cord[n]
-            graph.nodes[n]['load'] = load[n]
-            graph.nodes[n]['label'] = 'H'
-    
-    # get cost of candidate edges
-    for e in graph.edges:
-        length = geodist(graph.nodes[e[0]]['cord'],graph.nodes[e[1]]['cord'])
-        factor = 1 + ( penalty * abs( sides[e[0]] - sides[e[1]] ) )
-        graph.edges[e]['cost'] = length * factor
-    return graph
+            G.add_node(f"T{probable_transformers.index(point)}", cord=point, load=0.0, label='T', side=side)
 
-
-def mycallback(model, where):
-    if where == grb.GRB.Callback.MIP:
-        # General MIP callback
-        objbst = model.cbGet(grb.GRB.Callback.MIP_OBJBST)
-        objbnd = model.cbGet(grb.GRB.Callback.MIP_OBJBND)
-        time = model.cbGet(grb.GRB.Callback.RUNTIME)
-        if(time>300 and abs(objbst - objbnd) < 0.005 * (1.0 + abs(objbst))):
-            print('Stop early - 0.50% gap achieved time exceeds 5 minutes')
-            model.terminate()
-        elif(time>60 and abs(objbst - objbnd) < 0.0025 * (1.0 + abs(objbst))):
-            print('Stop early - 0.25% gap achieved time exceeds 1 minute')
-            model.terminate()
-        elif(time>300 and abs(objbst - objbnd) < 0.01 * (1.0 + abs(objbst))):
-            print('Stop early - 1.00% gap achieved time exceeds 5 minutes')
-            model.terminate()
-        elif(time>480 and abs(objbst - objbnd) < 0.05 * (1.0 + abs(objbst))):
-            print('Stop early - 5.00% gap achieved time exceeds 8 minutes')
-            model.terminate()
-        elif(time>600 and abs(objbst - objbnd) < 0.1 * (1.0 + abs(objbst))):
-            print('Stop early - 10.0% gap achieved time exceeds 10 minutes')
-            model.terminate()
-        elif(time>1500 and abs(objbst - objbnd) < 0.15 * (1.0 + abs(objbst))):
-            print('Stop early - 15.0% gap achieved time exceeds 25 minutes')
-            model.terminate()
-        elif(time>3000 and abs(objbst - objbnd) < 0.2 * (1.0 + abs(objbst))):
-            print('Stop early - 20.0% gap achieved time exceeds 50 minutes')
-            model.terminate()
-        elif(time>6000 and abs(objbst - objbnd) < 0.3 * (1.0 + abs(objbst))):
-            print('Stop early - 30.0% gap achieved time exceeds 100 minutes')
-            model.terminate()
-        elif(time>12000 and abs(objbst - objbnd) < 0.4 * (1.0 + abs(objbst))):
-            print('Stop early - 40.0% gap achieved time exceeds 200 minutes')
-            model.terminate()
-    return
-
-
-def secnet_milp(graph, path, **kwargs):
-    # Get the keyword arguments
-    H = kwargs.get("max_hops", 10)
-    M = kwargs.get("max_rating", 25)
-    
-    edges = list(graph.edges)
-    nodes = list(graph.nodes)
-    hindex = [i for i,n in enumerate(nodes) if graph.nodes[n]['label'] == 'H']
-    
-    A = nx.incidence_matrix(graph,nodelist=nodes,edgelist=edges,oriented=True)
-    I = nx.incidence_matrix(graph,nodelist=nodes,edgelist=edges,oriented=False)
-    
-    # get coefficients and parameters from graph attributes
-    COST = nx.get_edge_attributes(graph,name='cost')
-    LOAD = nx.get_node_attributes(graph,name='load')
-    c = np.array([1e-3*COST[e] for e in edges])
-    p = np.array([1e-3*LOAD[nodes[i]] for i in hindex])
-    y = np.ones(shape=(len(hindex),))
-    
-    # Initialize the model
-    model = grb.Model(name="Get SecNet")
-    model.ModelSense = grb.GRB.MINIMIZE
-    
-    # Define variables
-    x = model.addMVar(len(edges), vtype=grb.GRB.BINARY, name='x')
-    f = model.addMVar(len(edges), vtype=grb.GRB.CONTINUOUS,
-                      lb=-grb.GRB.INFINITY, name='f')
-    z = model.addMVar(len(edges), vtype=grb.GRB.CONTINUOUS,
-                      lb=-grb.GRB.INFINITY, name='z')
-    
-    # Add radiality constraint
-    model.addConstr( x.sum() == len(hindex) )
-    model.addConstr( (A[hindex,:] @ f == -p) )
-    model.addConstr( f - (M * x) <= 0 )
-    model.addConstr( f + (M * x) >= 0 )
-    
-    # Add hop constraint as a heuristic constraint
-    model.addConstr( A[hindex,:] @ z == -y )
-    model.addConstr( z - (H * x) <= 0 )
-    model.addConstr( z + (H * x) >= 0 )
-    model.addConstr( I[hindex,:] @ x <= (2 * y) )
-    
-    # add objective function
-    model.setObjective( c @ x )
-    
-    # write the model
-    model.update()
-    model.write(f"{path}-secondary.lp")
-    
-    # Turn off display and heuristics
-    grb.setParam('OutputFlag', 0)
-    grb.setParam('Heuristics', 0)
-    
-    # Open log file
-    logfile = open(f'{path}-gurobi.log', 'w')
-    
-    # Pass data into my callback function
-    model._lastiter = -grb.GRB.INFINITY
-    model._lastnode = -grb.GRB.INFINITY
-    model._logfile = logfile
-    model._vars = model.getVars()
-    
-    # Solve model and capture solution information
-    model.optimize(mycallback)
-    # Close log file
-    logfile.close()
-    if model.SolCount == 0:
-        print(f'No solution found, optimization status = {model.Status}')
-        sys.exit(0)
+    # 3. Add edges between homes
+    if len(mapped_homes) > 10:
+        logger.info("Using Delaunay triangulation for home connections")
+        home_edges = delaunay_edges(mapped_homes)
     else:
-        x_optimal = x.getAttr("x").tolist()
-        optimal_edges = [e for i,e in enumerate(edges) if x_optimal[i]>0.5]
-    
-    # Generate the forest of trees
-    forest = nx.Graph()
-    forest.add_edges_from(optimal_edges)
-    
-    # Label the nodes and edges
-    for n in forest:
-        forest.nodes[n]['cord'] = graph.nodes[n]['cord']
-        forest.nodes[n]['label'] = graph.nodes[n]['label']
-        forest.nodes[n]['load'] = graph.nodes[n]['load']
-    
-    return forest
+        logger.info("Using all possible edges for home connections")
+        home_edges = all_pairs(mapped_homes)
 
-# def data_secnet(forest, link, linkgeom, counter, path):
-def data_secnet(forest, link, linkgeom, counter, filepath, **kwargs):
-    # Relabel the transformer IDs
-    replace_ID = {}
-    tnodes = sorted([n for n in forest if forest.nodes[n]["label"] == 'T'])
-    for n in tnodes:
-        replace_ID[n] = counter
-        counter += 1
-    nx.relabel_nodes(forest, replace_ID, copy=False)
+    for edge in home_edges:
+        add_edge(G, edge[0].id, edge[1].id)
+
+    # 4. Add edges between probable transformers and homes
+    for i, transformer in enumerate(probable_transformers):
+        transformer_id = f"T{i}"
+        if nearest_homes is None:
+            for home in mapped_homes:
+                add_edge(G, transformer_id, home.id)
+        else:
+            nearest = sorted(mapped_homes, key=lambda h: geodesic(transformer[::-1], h.cord[::-1]).meters)[:nearest_homes]
+            for home in nearest:
+                add_edge(G, transformer_id, home.id)
+
+    logger.info(f"Created graph with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
+    return G
+
+def interpolate_points(geometry: LineString, min_separation: float) -> List[Tuple[float, float]]:
+    """Interpolate points along the geometry at the specified minimum separation using geodesic distance."""
+    points = []
+    coords = list(geometry.coords)
+    total_length = sum(geodesic(coord[::-1], coords[i+1][::-1]).meters for i, coord in enumerate(coords[:-1]))
+    distance = 0
+    while distance < total_length:
+        point = geometry.interpolate(distance / total_length, normalized=True)
+        points.append((point.x, point.y))
+        distance += min_separation
+    return points
+
+def label_points(geometry: LineString, homes: List[Home], transformers: List[Tuple[float, float]]) -> List[Tuple[Union[Home, Tuple[float, float]], int]]:
+    """Label points as being on one side or the other of the geometry."""
+    link_coords = list(geometry.coords)
+    side = {home.id: 1 if LinearRing(link_coords + [tuple(home.cord), link_coords[0]]).is_ccw else -1 for home in homes}
     
-    # Get the transformer nodes and leaf nodes
-    tnodes = [n for n in forest if forest.nodes[n]['label']=='T']
-    lnodes = [n for n in forest if nx.degree(forest,n)==1 \
-              and forest.nodes[n]['label']=='H']
+    labeled_points = []
+    for home in homes:
+        labeled_points.append((home, side[home.id]))
     
-    # Store the transformer data
-    t_data = ""
-    for t in tnodes:
-        cord = list(forest.nodes[t]['cord'])
-        homes = list(nx.descendants(forest, t))
-        load = sum([forest.nodes[h]['load'] for h in homes])
-        
-        # Data record for transformers
-        t_data += " ".join([str(x) for x in [t, load] + cord]) + "\n"
+    for transformer in transformers:
+        labeled_points.append((transformer, 0))
     
-    # Store the secondary network branches
-    secnet_data = ""
-    for leaf in lnodes:
-        for tsfr in tnodes:
-            if nx.has_path(forest, leaf, tsfr):
-                secnet_data += " ".join(
-                    [str(x) for x in nx.shortest_path(
-                        forest, leaf, tsfr)[::-1]]) + "\n"
-    
-    # Store the road and transformer node connections
-    road_cords = list(linkgeom.coords)
-    road_cord1 = road_cords[0]
-    road_cord2 = road_cords[-1]
-    nodes = [road_cord1]+tnodes+[road_cord2]
-    connect_data = ' '.join([str(x) for x in nodes]) + "\n"
-    
-    # Write the data
-    mode = kwargs.get("write_mode", "a")
-    with open(f"{filepath}-transformers.txt", mode) as f:
-        f.write(t_data)
-    with open(f"{filepath}-secondary.txt", mode) as f:
-        f.write(secnet_data)
-    with open(f"{filepath}-connection.txt", mode) as f:
-        f.write(connect_data)
-    return counter
+    return labeled_points
+
+def delaunay_edges(homes: List[Home]) -> List[Tuple[Home, Home]]:
+    """Get edges from Delaunay triangulation of home locations."""
+    points = np.array([home.cord for home in homes])
+    tri = Delaunay(points)
+    edges = set()
+    for simplex in tri.simplices:
+        edges.add(tuple(sorted((simplex[0], simplex[1]))))
+        edges.add(tuple(sorted((simplex[1], simplex[2]))))
+        edges.add(tuple(sorted((simplex[2], simplex[0]))))
+    return [(homes[i], homes[j]) for i, j in edges]
+
+def all_pairs(homes: List[Home]) -> List[Tuple[Home, Home]]:
+    """Get all possible pairs of homes."""
+    return [(homes[i], homes[j]) for i in range(len(homes)) for j in range(i+1, len(homes))]
+
+def add_edge(G: nx.Graph, node1: str, node2: str):
+    """Add an edge to the graph with length and crossing attributes."""
+    cord1 = G.nodes[node1]['cord']
+    cord2 = G.nodes[node2]['cord']
+    length = geodesic(cord1[::-1], cord2[::-1]).meters
+    crossing = abs(G.nodes[node1]['side'] - G.nodes[node2]['side'])
+    G.add_edge(node1, node2, length=length, crossing=crossing)
 
 
+def create_secondary_distribution_network(
+        graph: nx.Graph,
+        penalty: float = 0.5,
+        max_rating: float = 25e3,
+        max_hops: int = 10
+    ) -> nx.Graph:
+
+    # Step 1: Prepare the input data
+    nodes = list(graph.nodes())
+    edges = list(graph.edges())
+    home_nodes = [n for n, d in graph.nodes(data=True) if d['label'] == 'H']
+    
+    # Create parameter vectors and matrices
+    p = np.array([graph.nodes[n]['load'] for n in nodes])
+    c = np.array([graph[u][v]['length'] + (penalty * graph[u][v]['crossing']) for u, v in edges])
+    y = np.ones(len(home_nodes))
+    
+    # Create incidence matrices
+    A = nx.incidence_matrix(graph, oriented=True).todense()
+    I = np.abs(A)
+    
+    # Create submatrices for home nodes
+    home_indices = [nodes.index(n) for n in home_nodes]
+    Ar = A[home_indices, :]
+    Ir = I[home_indices, :]
+    
+    # Step 2: Define the optimization variables
+    x = cp.Variable(len(edges), boolean=True)
+    f = cp.Variable(len(edges))
+    z = cp.Variable(len(edges))
+    
+    # Step 3: Define the objective function
+    objective = cp.Minimize(c @ x)
+    
+    # Step 4: Define the constraints
+    constraints = [
+        cp.sum(x) == len(home_nodes),
+        Ar @ f == -p[home_indices],
+        f - (max_rating * x) <= 0,
+        f + (max_rating * x) >= 0,
+        Ar @ z == -y,
+        z - (max_hops * x) <= 0,
+        z + (max_hops * x) >= 0,
+        Ir @ x <= 2 * y
+    ]
+    
+    # Step 5: Solve the optimization problem
+    problem = cp.Problem(objective, constraints)
+    logger.info("Starting optimization")
+    problem.solve(solver=cp.SCIP, verbose=True)
+    logger.info(f"Optimization completed. Status: {problem.status}, Optimal value: {problem.value}")
+    
+    # Step 6: Construct the result graph
+    result = nx.Graph()
+    
+    # Add the selected edges to the result graph
+    for i, (u, v) in enumerate(edges):
+        if x.value[i] > 0.5:  # Consider the edge selected if x > 0.5
+            result.add_edge(u, v, **graph[u][v])
+    
+    # Add node attributes for nodes in the result graph
+    for node in result.nodes():
+        result.nodes[node].update(graph.nodes[node])
+    
+    logger.info(f"Result graph created with {result.number_of_nodes()} nodes and {result.number_of_edges()} edges")
+    return result
+
+
+if __name__ == "__main__":
+    logger.info("SecNet module executed directly")
+    # Add any direct execution code here if needed
+
+    from utils.dataloader import load_homes
+    from utils.osm_utils import load_roads
+    input_home_csv = "data/load/test-home-load.csv"
+    homes = load_homes(file_path=input_home_csv)
+    roads = load_roads(homes)
+
+    from utils.mapping import(
+        read_mapping_from_file, 
+        compute_edge_to_homes_map
+    )
+    h2r = read_mapping_from_file(homes, filename="out/test_map_h2r.txt")
+    r2h = compute_edge_to_homes_map(h2r)
+
+    test_road = [r for r in r2h if len(r2h[r])>13 and len(r2h[r])<15][0]
+    test_geom = roads.edges(keys=True)[test_road]['geometry']
+    candidate_g = create_candidate_network(
+        test_geom,
+        r2h[test_road],
+    )
+
+    result_secnet = create_secondary_distribution_network(
+        graph=candidate_g,
+    )
+
+
+    from utils.drawings import plot_candidate, plot_secnet
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(2, 1, figsize=(20,20))
+    plot_candidate(candidate_g, test_geom, ax=ax[0], fontsize=18)
+    plot_secnet(result_secnet, test_geom, ax=ax[1], fontsize=18)
+    fig.savefig("figs/test_candidate_graph.png", bbox_inches='tight')
+    
