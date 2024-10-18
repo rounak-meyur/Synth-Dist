@@ -1,13 +1,9 @@
 import osmnx as ox
-import networkx as nx
-from pyqtree import Index
-from geopy.distance import geodesic
 from shapely.geometry import Point, Polygon, LineString
 from shapely.ops import unary_union
-from typing import List, Tuple, Dict
+from typing import List
 import matplotlib.pyplot as plt
 from pathlib import Path
-from collections import defaultdict
 import os
 import sys
 
@@ -75,90 +71,6 @@ def load_roads(homes: List[Home]):
 
     logger.info(f"Added geometry to {edges_without_geometry} edges without existing geometry")
     return G
-
-def map_homes_to_edges(G: nx.MultiDiGraph, homes: List[Home], padding_distance: float = 0.005) -> List[Tuple[Home, Tuple]]:
-    """
-    Map each home to the nearest road network edge.
-
-    Args:
-        G (nx.MultiDiGraph): The road network graph.
-        homes (List[Home]): List of Home objects to map.
-        padding_distance (float): Distance in radians to use for padding around edges and homes.
-
-    Returns:
-        List[Tuple[Home, Tuple]]: List of tuples containing each home and its nearest edge (u, v, key).
-    """
-    logger.info(f"Mapping {len(homes)} homes to nearest edges")
-
-    # Calculate and add bounding box to the graph
-    node_points = [Point((data['x'], data['y'])) for _, data in G.nodes(data=True)]
-    bbox = unary_union(node_points).bounds
-    G.graph['bbox'] = bbox
-
-    # Create a spatial index for the edge geometries
-    idx = Index(bbox=(G.graph['bbox'][0], G.graph['bbox'][1], G.graph['bbox'][2], G.graph['bbox'][3]))
-
-    # Add padded edge geometries to the index
-    for u, v, key, data in G.edges(keys=True, data=True):
-        edge_geom = data['geometry']
-        edge_box = edge_geom.buffer(padding_distance).bounds
-        idx.insert((u, v, key), edge_box)
-
-    mapped_homes = []
-
-    for home_idx, home in enumerate(homes):
-        if (home_idx % 20) == 0 and home_idx != 0:
-            logger.info(f"{home_idx}/{len(homes)} mapped to nearest road network edge.")
-        home_point = Point(home.cord[0], home.cord[1])
-        home_box = home_point.buffer(padding_distance).bounds
-
-        # Find potential nearby edges
-        nearby_edges = idx.intersect(home_box)
-
-        nearest_edge = None
-        min_distance = float('inf')
-
-        for u, v, key in nearby_edges:
-            edge_geom = G.edges[u, v, key]['geometry']
-            edge_coords = list(edge_geom.coords)
-            
-            # Calculate distances to all points on the edge
-            distances = [geodesic((home.cord[1], home.cord[0]), (y, x)).meters for x, y in edge_coords]
-            
-            min_edge_distance = min(distances)
-            
-            if min_edge_distance < min_distance:
-                min_distance = min_edge_distance
-                nearest_edge = (u, v, key)
-
-        if nearest_edge:
-            mapped_homes.append((home, nearest_edge))
-        else:
-            logger.warning(f"No nearby edge found for home at {home.cord}")
-
-    logger.info(f"Successfully mapped {len(mapped_homes)} homes to edges")
-    return mapped_homes
-
-def compute_edge_to_homes_map(home_to_edge_map: List[Tuple[Home, Tuple]]) -> Dict[Tuple, List[Home]]:
-    """
-    Compute a reverse map from road network edges to homes.
-
-    Args:
-        home_to_edge_map (List[Tuple[Home, Tuple]]): List of tuples containing each home and its nearest edge (u, v, key).
-
-    Returns:
-        Dict[Tuple, List[Home]]: Dictionary mapping each edge (u, v, key) to a list of homes nearest to it.
-    """
-    logger.info("Computing reverse map from edges to homes")
-
-    edge_to_homes_map = defaultdict(list)
-
-    for home, edge in home_to_edge_map:
-        edge_to_homes_map[edge].append(home)
-
-    logger.info(f"Computed reverse map for {len(edge_to_homes_map)} edges")
-
-    return dict(edge_to_homes_map)
 
 def plot_network(G, homes: List[Home], filename: str = 'network.png'):
     """
