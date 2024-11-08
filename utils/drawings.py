@@ -1,12 +1,22 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Nov 21 13:53:11 2022
-
-Author: Rounak Meyur
-"""
-
 from shapely.geometry import Point, LineString
 import geopandas as gpd
+import os
+import sys
+
+if __name__ == "__main__":
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    sys.path.append(parent_dir)
+
+from utils.logging_utils import LogManager
+
+if __name__ == "__main__":
+    LogManager.initialize(
+        log_file_path="logs/test_drawing.log", 
+        log_config_path="configs/logging_config.ini"
+    )
+
+logger = LogManager.get_logger("drawing")
 
 
 def plot_roads(roads, ax, **kwargs):
@@ -65,13 +75,21 @@ def plot_candidate(graph, linkgeom, ax, **kwargs):
     
     show_candidate = kwargs.get("show_candidate", True)
     
-    # ------ plot the residence nodes -----------
-    hnodes = [n for n in graph if graph.nodes[n]['label']=='H']
+    # ------ plot the residence nodes on side A -----------
+    hnodes = [n for n in graph if graph.nodes[n]['label']=='H' and graph.nodes[n]['side']==1]
     d = {'nodes':hnodes,
          'geometry':[Point(graph.nodes[n]["cord"]) for n in hnodes]}
     df_nodes = gpd.GeoDataFrame(d, crs="EPSG:4326")
-    df_nodes.plot(ax = ax, color = homecolor, markersize = homesize, 
-                  alpha = alpha, label = "residences")
+    df_nodes.plot(ax = ax, color = homecolor, marker = "*", 
+                  markersize = homesize, alpha = alpha, label = "residences on side A")
+    
+    # ------ plot the residence nodes on side B -----------
+    hnodes = [n for n in graph if graph.nodes[n]['label']=='H' and graph.nodes[n]['side']==-1]
+    d = {'nodes':hnodes,
+         'geometry':[Point(graph.nodes[n]["cord"]) for n in hnodes]}
+    df_nodes = gpd.GeoDataFrame(d, crs="EPSG:4326")
+    df_nodes.plot(ax = ax, color = homecolor, marker = "^", 
+                  markersize = homesize, alpha = alpha, label = "residences on side B")
     
     # ------ plot the probable transformer nodes -----------
     tnodes = [n for n in graph if graph.nodes[n]['label']=='T']
@@ -101,7 +119,7 @@ def plot_candidate(graph, linkgeom, ax, **kwargs):
     
     # ----- Legend handler ------
     fontsize = kwargs.get('fontsize', 30)
-    ax.legend(loc='best', markerscale=3, fontsize=fontsize)
+    ax.legend(loc='upper left', markerscale=1.5, fontsize=fontsize)
     ax.tick_params(left=False, bottom=False, 
                     labelleft=False, labelbottom=False)
     return
@@ -153,36 +171,8 @@ def plot_secnet(graph, linkgeom, ax, **kwargs):
     
     # ----- Legend handler ------
     fontsize = kwargs.get('fontsize', 30)
-    ax.legend(loc='best', markerscale=3, fontsize=fontsize)
+    ax.legend(loc='upper left', markerscale=1.5, fontsize=fontsize)
     ax.tick_params(left=False, bottom=False, 
                     labelleft=False, labelbottom=False)
     return
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

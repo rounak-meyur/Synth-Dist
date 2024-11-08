@@ -1,0 +1,17 @@
+inputs:
+  home_csv: "data/load/test-home-load.csv"
+  substation_csv: "data/substations.csv"
+
+logging:
+  log_file: "logs/application_test.log"
+
+mapping:
+  padding: 0.001
+
+secnet:
+  separation: 50
+  transformer_prefix: 51121000000000000
+
+outputs:
+  home_to_road: "out/test_map_h2r.txt"
+  road_to_home: "out/test_map_r2h.txt"
