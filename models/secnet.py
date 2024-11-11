@@ -26,11 +26,12 @@ logger = LogManager.get_logger("secnet")
 
 
 def create_candidate_network(
-    road_edge_geometry: LineString,
-    mapped_homes: List[Home],
-    nearest_homes: Optional[int] = None,
-    minimum_separation: float = 50.0
-) -> nx.Graph:
+        road_edge: Tuple,
+        road_edge_geometry: LineString,
+        mapped_homes: List[Home],
+        nearest_homes: Optional[int] = None,
+        minimum_separation: float = 50.0
+    ) -> Tuple[nx.Graph, List[Union[int, str]]]:
     """
     Create an undirected graph representing the candidate set of edges for the optimal secondary distribution network.
 
@@ -41,9 +42,15 @@ def create_candidate_network(
         minimum_separation (float): Minimum distance in meters between points on the road edge geometry.
 
     Returns:
-        nx.Graph: An undirected graph representing the candidate secondary distribution network.
+        Tuple containing:
+        - nx.Graph: The candidate network graph (without road nodes)
+        - List[Union[int, str]]: Node IDs in order (start node, transformer nodes, end node)
     """
     logger.info(f"Creating candidate network for {len(mapped_homes)} homes")
+
+    # Get road end points
+    start_node = road_edge[0]  
+    end_node = road_edge[1]
 
     # 1. Interpolate points along the road edge geometry
     probable_transformers = interpolate_points(road_edge_geometry, minimum_separation)
@@ -86,7 +93,10 @@ def create_candidate_network(
                 add_edge(G, transformer_id, home.id)
 
     logger.info(f"Created graph with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
-    return G
+
+    # Create ordered lists of nodes and coordinates, including road nodes but without modifying original IDs
+    ordered_nodes = [start_node] + [f"T{i}" for i in range(len(probable_transformers))] + [end_node]
+    return G, ordered_nodes
 
 def interpolate_points(geometry: LineString, min_separation: float) -> List[Tuple[float, float]]:
     """Interpolate points along the geometry at the specified minimum separation using geodesic distance."""
@@ -224,16 +234,17 @@ if __name__ == "__main__":
     r2h = compute_edge_to_homes_map(h2r)
 
     test_road = [r for r in r2h if len(r2h[r])>13 and len(r2h[r])<15][0]
+    logger.info(f"Creating secondary network for road link: {test_road}")
     test_geom = roads.edges(keys=True)[test_road]['geometry']
-    candidate_g = create_candidate_network(
-        test_geom,
+    candidate_g, road_nodes = create_candidate_network(
+        test_road, test_geom,
         r2h[test_road],
     )
+    logger.info(f"Nodes along the road link in order: {road_nodes}")
 
     result_secnet = create_secondary_distribution_network(
         graph=candidate_g,
     )
-
 
     from utils.drawings import plot_candidate, plot_secnet
     import matplotlib.pyplot as plt

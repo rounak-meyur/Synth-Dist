@@ -7,11 +7,15 @@ logging:
 
 mapping:
   padding: 0.001
+  home_to_road: "out/mapping/test_map_h2r.txt"
+  road_to_home: "out/mapping/test_map_r2h.txt"
 
 secnet:
-  separation: 50
-  transformer_prefix: 51121000000000000
-
-outputs:
-  home_to_road: "out/test_map_h2r.txt"
-  road_to_home: "out/test_map_r2h.txt"
+  out_dir: "out/secnet/"
+  base_transformer_id: 51121000000000000
+  out_prefix: "test"
+  secnet_args:
+    separation: 50.0
+    penalty: 0.5
+    max_rating: 25000
+    max_hops: 10
