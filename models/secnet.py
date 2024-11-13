@@ -46,7 +46,7 @@ def create_candidate_network(
         - nx.Graph: The candidate network graph (without road nodes)
         - List[Union[int, str]]: Node IDs in order (start node, transformer nodes, end node)
     """
-    logger.info(f"Creating candidate network for {len(mapped_homes)} homes")
+    logger.info(f"Creating candidate network for {len(mapped_homes)} homes mapped to {road_edge}")
 
     # Get road end points
     start_node = road_edge[0]  
@@ -230,10 +230,10 @@ if __name__ == "__main__":
         read_mapping_from_file, 
         compute_edge_to_homes_map
     )
-    h2r = read_mapping_from_file(homes, filename="out/test_map_h2r.txt")
+    h2r = read_mapping_from_file(homes, filename="out/mapping/test_map_h2r.txt")
     r2h = compute_edge_to_homes_map(h2r)
 
-    test_road = [r for r in r2h if len(r2h[r])>13 and len(r2h[r])<15][0]
+    test_road = (896654257, 896654257, 0)
     logger.info(f"Creating secondary network for road link: {test_road}")
     test_geom = roads.edges(keys=True)[test_road]['geometry']
     candidate_g, road_nodes = create_candidate_network(
