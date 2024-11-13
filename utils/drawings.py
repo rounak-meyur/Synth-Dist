@@ -52,11 +52,25 @@ def plot_homes(homes, ax, **kwargs):
     alpha = kwargs.get("alpha", 1.0)
     
     # ------ plot the nodes -----------
-    d = {'nodes':[h for h in homes.cord],
-         'geometry':[Point(homes.cord[h]) for h in homes.cord]}
+    d = {'nodes':[home.id for home in homes],
+         'geometry':[Point(home.cord[0], home.cord[1]) for home in homes]}
     df_nodes = gpd.GeoDataFrame(d, crs="EPSG:4326")
     df_nodes.plot(ax = ax, color = color, markersize = size, 
                   alpha = alpha, label = "residences")
+    return
+
+def plot_substations(subs, ax, **kwargs):
+    # ------ parameters for plot ------
+    color = kwargs.get("color", 'royalblue')
+    size = kwargs.get("size", 200)
+    alpha = kwargs.get("alpha", 1.0)
+    
+    # ------ plot the nodes -----------
+    d = {'nodes':[sub.id for sub in subs],
+         'geometry':[Point(sub.cord[0], sub.cord[1]) for sub in subs]}
+    df_nodes = gpd.GeoDataFrame(d, crs="EPSG:4326")
+    df_nodes.plot(ax = ax, color = color, markersize = size, 
+                  alpha = alpha, label = "substations")
     return
 
 
@@ -176,3 +190,45 @@ def plot_secnet(graph, linkgeom, ax, **kwargs):
                     labelleft=False, labelbottom=False)
     return
 
+def plot_combined_road_transformer(combined_network, ax, **kwargs):
+    # ------ parameters for plot ------
+    roadnodecolor = kwargs.get("roadnodecolor", 'black')
+    roadnodesize = kwargs.get("roadnodesize", 5)
+    tsfrnodecolor = kwargs.get("transformercolor", 'seagreen')
+    tsfrnodesize = kwargs.get("transformersize", 50)
+    edgecolor = kwargs.get("edgecolor", 'black')
+    width = kwargs.get("width", 1.0)
+    alpha = kwargs.get("alpha", 1.0)
+    style = kwargs.get("linestyle", 'dashed')
+    
+    # ------ plot the road nodes -----------
+    d = {'nodes':[n for n in combined_network.nodes if combined_network.nodes[n]['label']=='R'],
+         'geometry':[Point(combined_network.nodes[n]["cord"][0],
+                           combined_network.nodes[n]["cord"][1]) \
+                     for n in combined_network.nodes if combined_network.nodes[n]['label']=='R']}
+    df_nodes = gpd.GeoDataFrame(d, crs="EPSG:4326")
+    df_nodes.plot(ax = ax, color = roadnodecolor, markersize = roadnodesize, 
+                  alpha = alpha, label = "road nodes")
+    
+    # ------ plot the transformer nodes -----------
+    d = {'nodes':[n for n in combined_network.nodes if combined_network.nodes[n]['label']=='T'],
+         'geometry':[Point(combined_network.nodes[n]["cord"][0],
+                           combined_network.nodes[n]["cord"][1]) \
+                     for n in combined_network.nodes if combined_network.nodes[n]['label']=='T']}
+    df_nodes = gpd.GeoDataFrame(d, crs="EPSG:4326")
+    df_nodes.plot(ax = ax, color = tsfrnodecolor, markersize = tsfrnodesize, 
+                  alpha = alpha, label = "transformers")
+    
+    # ------ plot the edges -----------
+    d = {'edges':[e for e in combined_network.edges],
+         'geometry':[combined_network.edges[e]['geometry'] for e in combined_network.edges]}
+    df_edges = gpd.GeoDataFrame(d, crs="EPSG:4326")
+    df_edges.plot(ax = ax, edgecolor = edgecolor, linewidth = width,
+                  linestyle = style, alpha = alpha, label = "road edges")
+    
+    # ----- Legend handler ------
+    fontsize = kwargs.get('fontsize', 30)
+    ax.legend(loc='upper left', markerscale=1.5, fontsize=fontsize)
+    ax.tick_params(left=False, bottom=False, 
+                    labelleft=False, labelbottom=False)
+    return
