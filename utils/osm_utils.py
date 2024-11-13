@@ -1,8 +1,11 @@
 import osmnx as ox
 from shapely.geometry import Point, Polygon, LineString
 from shapely.ops import unary_union
+import shapely.wkt as wkt
 from typing import List
 import matplotlib.pyplot as plt
+import networkx as nx
+import csv
 from pathlib import Path
 import os
 import sys
@@ -70,6 +73,114 @@ def load_roads(homes: List[Home]):
             edges_without_geometry += 1
 
     logger.info(f"Added geometry to {edges_without_geometry} edges without existing geometry")
+    return G
+
+def save_road_network(
+        G: nx.MultiDiGraph, 
+        edgelist_file: str = 'road_network_edges.csv', 
+        nodelist_file: str = 'road_network_nodes.csv'
+        ):
+    """
+    Save road network graph as separate edgelist and nodelist files.
+
+    Args:
+        G (nx.MultiDiGraph): The road network graph.
+        edgelist_file (str): Name of the output file for edges (default: 'road_network_edges.csv').
+        nodelist_file (str): Name of the output file for nodes (default: 'road_network_nodes.csv').
+    """
+    logger.info(f"Saving road network to {edgelist_file} and {nodelist_file}")
+    
+    # Create output directories if they don't exist
+    Path(edgelist_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(nodelist_file).parent.mkdir(parents=True, exist_ok=True)
+
+    # Save edges
+    with open(edgelist_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        # Write edge header
+        writer.writerow(['u', 'v', 'key', 'geometry', 'length', 'highway'])
+        
+        # Write edges
+        for u, v, key, data in G.edges(keys=True, data=True):
+            # Convert geometry to WKT format for string representation
+            geometry_wkt = data.get('geometry', '').wkt if 'geometry' in data else ''
+            
+            # Get edge attributes
+            length = data.get('length', '')
+            highway = data.get('highway', '')
+            
+            writer.writerow([u, v, key, geometry_wkt, length, highway])
+    
+    # Save nodes
+    with open(nodelist_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        # Write node header
+        writer.writerow(['node_id', 'x', 'y'])
+        
+        # Write nodes
+        for node, data in G.nodes(data=True):
+            x = data.get('x', '')
+            y = data.get('y', '')
+            writer.writerow([node, x, y])
+    
+    logger.info(f"Saved {G.number_of_edges()} edges and {G.number_of_nodes()} nodes")
+
+def load_road_network_from_files(edgelist_file: str = 'road_network_edges.csv',
+                               nodelist_file: str = 'road_network_nodes.csv') -> nx.MultiDiGraph:
+    """
+    Load road network graph from edgelist and nodelist files.
+
+    Args:
+        edgelist_file (str): Path to the edgelist file.
+        nodelist_file (str): Path to the nodelist file.
+
+    Returns:
+        nx.MultiDiGraph: The loaded road network graph.
+
+    Raises:
+        FileNotFoundError: If either file doesn't exist.
+    """
+    logger.info(f"Loading road network from {edgelist_file} and {nodelist_file}")
+    
+    # Check if files exist
+    if not Path(edgelist_file).exists():
+        logger.error(f"Edgelist file not found: {edgelist_file}")
+        raise FileNotFoundError(f"The file {edgelist_file} does not exist.")
+    
+    if not Path(nodelist_file).exists():
+        logger.error(f"Nodelist file not found: {nodelist_file}")
+        raise FileNotFoundError(f"The file {nodelist_file} does not exist.")
+    
+    G = nx.MultiDiGraph()
+    
+    # Load nodes first
+    with open(nodelist_file, 'r', newline='') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            node_id = int(row['node_id'])
+            # Convert coordinates to float, use None if empty
+            x = float(row['x']) if row['x'] else None
+            y = float(row['y']) if row['y'] else None
+            G.add_node(node_id, x=x, y=y)
+    
+    # Load edges
+    with open(edgelist_file, 'r', newline='') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            # Convert geometry from WKT back to Shapely geometry
+            geometry = wkt.loads(row['geometry']) if row['geometry'] else None
+            
+            # Add edge with attributes
+            G.add_edge(
+                int(row['u']), 
+                int(row['v']), 
+                key=int(row['key']),
+                geometry=geometry,
+                length=float(row['length']) if row['length'] else None,
+                highway=row['highway']
+            )
+    
+    logger.info(f"Loaded {G.number_of_edges()} edges and {G.number_of_nodes()} nodes")
     return G
 
 def plot_network(G, homes: List[Home], filename: str = 'network.png'):
