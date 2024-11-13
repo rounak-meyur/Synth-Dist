@@ -5,6 +5,10 @@ inputs:
 logging:
   log_file: "logs/application_test.log"
 
+intermediate:
+  road_edges: "out/interim/test_road_edges.csv"
+  road_nodes: "out/interim/test_road_nodes.csv"
+
 mapping:
   padding: 0.001
   home_to_road: "out/mapping/test_map_h2r.txt"
