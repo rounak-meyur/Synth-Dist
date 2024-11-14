@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Tuple, List
 from pathlib import Path
 import pandas as pd
+import numpy as np
 from shapely.geometry import Point
 from shapely.ops import unary_union
 from utils.logging_utils import LogManager
@@ -88,6 +89,7 @@ def load_homes(file_path: str) -> List[Home]:
 def load_substations(file_path: str, homes: List[Home]) -> List[Substation]:
     """
     Load substation data from a CSV file and filter based on homes convex hull.
+    The CSV file should have the columns: 'ID', 'X' and 'Y'
 
     Args:
         file_path (str): Path to the CSV file containing substation data.
@@ -118,7 +120,11 @@ def load_substations(file_path: str, homes: List[Home]) -> List[Substation]:
 
     # Load and filter substations
     substations = []
-    df = pd.read_csv(file_path, usecols=['ID', 'X', 'Y'])
+    df = pd.read_csv(
+        file_path, 
+        usecols=['ID', 'X', 'Y'], 
+        dtype = {'ID': str, 'X': np.float64, 'Y': np.float64}
+        )
     logger.info(f"Loaded {len(df)} substations from CSV")
 
     for index, row in df.iterrows():
