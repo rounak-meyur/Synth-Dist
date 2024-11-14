@@ -11,6 +11,11 @@ def main():
         help = "path to configuration file",
         default = "configs/test.yaml"
     )
+    parser.add_argument(
+        "-p", "--generate_plot",
+        help = "generate plots",
+        action = "store_true"
+    )
     args = parser.parse_args()
     configpath = args.configPath
     conf = OmegaConf.load(configpath)
@@ -68,10 +73,10 @@ def main():
     logger.info(f"Residence and road data mapping complete in {time.time()-ts} seconds.")
 
     # Generate secondary network and combine road network with transformers
+    ts = time.time()
     combined_edges = f"{conf['secnet']['out_dir']}{conf['secnet']['out_prefix']}_combined_network_edges.csv"
     combined_nodes = f"{conf['secnet']['out_dir']}{conf['secnet']['out_prefix']}_combined_network_nodes.csv"
     if not os.path.exists(combined_edges) or not os.path.exists(combined_nodes):
-        ts = time.time()
         from utils.secnet_utils import SecondaryNetworkGenerator
         generator = SecondaryNetworkGenerator(
             output_dir=conf["secnet"]["out_dir"],
@@ -90,7 +95,6 @@ def main():
                 **secnet_args
             )
             generator.save_results(prefix=conf["secnet"]["out_prefix"], road_link_id=road_link)
-        logger.info(f"Secondary network generation complete in {time.time()-ts} seconds.")
 
         # Combine road network with transformers
         combined_network = generator.combine_networks(road_network=roads, prefix=conf["secnet"]["out_prefix"])
@@ -100,15 +104,41 @@ def main():
             nodes_file=combined_nodes,
             edges_file=combined_edges
             )
+    logger.info(f"Secondary network generation/loading complete in {time.time()-ts} seconds.")
     
-    import matplotlib.pyplot as plt
-    from utils.drawings import plot_combined_road_transformer, plot_substations, plot_homes
-    fig, ax = plt.subplots(1, 1, figsize=(30,18))
-    plot_substations(subs, ax=ax)
-    plot_homes(homes, ax=ax)
-    plot_combined_road_transformer(combined_network, ax=ax)
-    fig.suptitle("Road network with transformers and substations", fontsize=55)
-    fig.savefig("figs/test_combined_network.png", bbox_inches='tight')
+    if args.generate_plot:
+        import matplotlib.pyplot as plt
+        from utils.drawings import plot_combined_road_transformer, plot_substations, plot_homes
+        fig, ax = plt.subplots(1, 1, figsize=(30,18))
+        plot_substations(subs, ax=ax)
+        plot_homes(homes, ax=ax)
+        plot_combined_road_transformer(combined_network, ax=ax)
+        fig.suptitle("Road network with transformers and substations", fontsize=55)
+        fig.savefig("figs/test_combined_network.png", bbox_inches='tight')
+
+    # Partition transformer nodes to the nearest reachable substation
+    ts = time.time()
+    assignment_json = conf["partitioning"]["assignment_json"]
+    if not os.path.exists(assignment_json):
+        from utils.partition_utils import NetworkPartitioner
+        partitioner = NetworkPartitioner(combined_network)
+        try:
+            # Find nearest road nodes - will automatically retry with increased radius if needed
+            substation_nodes = partitioner.find_nearest_road_nodes(
+                subs,
+                search_radius=conf["partitioning"]["padding"]
+            )
+            transformer_assignements = partitioner.partition_transformers(substation_nodes)
+            partitioner.save_partitioning(
+                transformer_assignements, 
+                output_file=assignment_json
+                )
+        except ValueError as e:
+            logger.error(f"Error ocurred while partitioning: {e}")
+    else:
+        from utils.partition_utils import load_partitioning
+        substation_nodes = load_partitioning(assignment_json)
+    logger.info(f"Transformer partitioning complete in {time.time()-ts} seconds.")
     
 if __name__ == "__main__":
     main()
