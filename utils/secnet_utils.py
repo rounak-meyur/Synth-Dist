@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from typing import Tuple, List, Dict, Optional, Set
+from typing import Tuple, List, Dict, Optional, Set, Union, Any
 from shapely.geometry import LineString
 import networkx as nx
+from geopy.distance import geodesic
 import pandas as pd
 from pathlib import Path
 
@@ -51,6 +52,9 @@ class SecondaryNetworkGenerator:
         self.secondary_edges = []
         self.transformer_road_edges = []
         self._next_transformer_id = base_transformer_id
+
+        # Track files created in this session
+        self._session_files = set()
     
     def _generate_transformer_id(self) -> str:
         """
@@ -230,89 +234,501 @@ class SecondaryNetworkGenerator:
                 'length': data['length'],
             })
     
-    def save_results(self, prefix: str = "network") -> None:
+    def _save_road_transformer_sequence(
+        self, 
+        filepath: Path, 
+        road_link_id: Tuple[int, int, str], 
+        nodes: List[Union[int, str]]
+    ) -> None:
         """
-        Append results to existing CSV files or create new ones if they don't exist.
+        Save road transformer sequence to a text file.
+        If first save in session, overwrite file; otherwise append.
+        
+        Args:
+            filepath (Path): Path to the text file
+            road_link_id (Tuple[int, int, str]): Tuple of (start_node, end_node, edge_key)
+                where start_node and end_node are integers
+            nodes (List[Union[int, str]]): Ordered list of nodes including road nodes (int) 
+                and transformer nodes (str)
+        """
+        mode = 'w' if filepath not in self._session_files else 'a'
+        with open(filepath, mode, encoding='utf-8') as f:
+            # Format road link ID components with edge key
+            start_node, end_node, edge_key = road_link_id
+            # Convert node list to strings, road nodes are integers
+            node_sequence = ' '.join(str(n) for n in nodes)
+            f.write(f"{start_node} {end_node} {edge_key} {node_sequence}\n")
+        
+        # Track file creation in this session
+        self._session_files.add(filepath)
+
+    def _save_dataframe(self, df: pd.DataFrame, filepath: Path) -> None:
+        """
+        Save DataFrame to CSV, overwriting if first time in session, appending otherwise.
+        
+        Args:
+            df (pd.DataFrame): DataFrame to save
+            filepath (Path): Path to save the CSV file
+        """
+        if filepath not in self._session_files:
+            # First time in this session - overwrite the file
+            df.to_csv(filepath, index=False, mode='w')
+            self._session_files.add(filepath)
+        else:
+            # Already created in this session - append without header
+            df.to_csv(filepath, index=False, mode='a', header=False)
+
+    def save_results(
+        self, 
+        prefix: str = "network", 
+        road_link_id: Tuple[int, int, str] = None
+    ) -> None:
+        """
+        Save results to files. For each file:
+        - If first save in this session: overwrite existing file
+        - If subsequent save in this session: append to file
         
         Args:
             prefix (str, optional): Prefix for output files. Defaults to "network"
+            road_link_id (Tuple[int, int, str]): Tuple of (start_node, end_node, edge_key)
+                where start_node and end_node are integers
         """
-        def save_df_with_append(df: pd.DataFrame, filepath: Path, index: bool = False) -> None:
-            """
-            Save DataFrame to CSV, appending if file exists, creating new if it doesn't.
-            
-            Args:
-                df (pd.DataFrame): DataFrame to save
-                filepath (Path): Path to save the CSV file
-                index (bool, optional): Whether to write row indices. Defaults to False.
-            """
-            if not filepath.exists():
-                # If file doesn't exist, save with header
-                df.to_csv(filepath, index=index, mode='w')
-            else:
-                # If file exists, append without header
-                df.to_csv(filepath, index=index, mode='a', header=False)
-
         # Save transformers
-        transformer_data = [
-            {
-                'transformer_id': t.id,
-                'longitude': t.cord[0],
-                'latitude': t.cord[1],
-                'total_load': t.load
-            }
-            for t in self.all_transformers.values()
-        ]
-        if transformer_data:  # Only save if there are transformers
+        transformer_file = self.output_dir / f"{prefix}_transformers.csv"
+        if self.all_transformers:
+            transformer_data = [
+                {
+                    'transformer_id': t.id,
+                    'longitude': t.cord[0],
+                    'latitude': t.cord[1],
+                    'total_load': t.load
+                }
+                for t in self.all_transformers.values()
+            ]
             transformer_df = pd.DataFrame(transformer_data)
-            transformer_file = self.output_dir / f"{prefix}_transformers.csv"
-            save_df_with_append(transformer_df, transformer_file)
+            self._save_dataframe(transformer_df, transformer_file)
         
         # Save secondary network edges
-        if self.secondary_edges:  # Only save if there are edges
+        edge_file = self.output_dir / f"{prefix}_secondary_edges.csv"
+        if self.secondary_edges:
+            # Include road link components in the edge data
+            if road_link_id:
+                start_node, end_node, edge_key = road_link_id
+                for edge in self.secondary_edges:
+                    edge['road_start'] = int(start_node)
+                    edge['road_end'] = int(end_node)
+                    edge['road_edge_key'] = edge_key
+            
             edge_df = pd.DataFrame(self.secondary_edges)
-            edge_file = self.output_dir / f"{prefix}_secondary_edges.csv"
-            save_df_with_append(edge_df, edge_file)
+            self._save_dataframe(edge_df, edge_file)
         
-        # Save road network edges with transformers
-        if self.transformer_road_edges:  # Only save if there are edges
-            road_edge_data = [
-                {'from_node': u, 'to_node': v}
-                for u, v in self.transformer_road_edges
-            ]
-            road_edge_df = pd.DataFrame(road_edge_data)
-            road_edge_file = self.output_dir / f"{prefix}_road_transformer_edges.csv"
-            save_df_with_append(road_edge_df, road_edge_file)
+        # Save road transformer sequence
+        road_seq_file = self.output_dir / f"{prefix}_road_transformer_edges.txt"
+        if road_link_id and self.transformer_road_edges:
+            # Get ordered list of nodes for this road link
+            nodes = []
+            for u, v in self.transformer_road_edges:
+                if not nodes:  # First edge
+                    nodes.extend([u, v])
+                else:  # Subsequent edges
+                    nodes.append(v)
+            
+            # Save to text file
+            self._save_road_transformer_sequence(road_seq_file, road_link_id, nodes)
         
         # Clear the current data after saving
         self.all_transformers.clear()
         self.secondary_edges.clear()
         self.transformer_road_edges.clear()
 
-# Example usage:
-"""
-# Initialize generator
-generator = SecondaryNetworkGenerator(
-    output_dir="output/networks",
-    base_transformer_id=1001
-)
+    def reset_session(self) -> None:
+        """
+        Reset the session tracking for file creation.
+        Next save will overwrite existing files.
+        """
+        self._session_files.clear()
 
-# Process road link with ordered nodes
-road_nodes = ['R1', 'T1', 'T2', 'R2', 'T3', 'R3']  # Original road nodes with potential transformers
-graph = create_input_graph(...)  # Create input graph
+    def combine_networks(
+        self,
+        road_network: nx.MultiGraph,
+        prefix: str = "network"
+    ) -> nx.MultiGraph:
+        """
+        Combine road network with transformer nodes by replacing road edges with 
+        transformer-connected edges.
+        
+        Args:
+            road_network (nx.MultiGraph): Original road network
+            prefix (str): Prefix used for input/output files
+            
+        Returns:
+            nx.MultiGraph: Combined network with transformer nodes and edges
+        """
+        transformer_edges_file = self.output_dir / f"{prefix}_road_transformer_edges.txt"
+        transformers_file = self.output_dir / f"{prefix}_transformers.csv"
+        
+        # Create new graph
+        new_graph = road_network.copy()
+        
+        # First, add all road network nodes with standardized attributes
+        for node, attrs in road_network.nodes(data=True):
+            new_graph.add_node(
+                node,
+                cord=(attrs['x'], attrs['y']),  # Convert x,y to cord
+                label='R',  # Road node
+                load=0.0    # Road nodes have zero load
+            )
+        
+        # Read transformer information
+        transformer_info = {}
+        if transformers_file.exists():
+            df_transformers = pd.read_csv(transformers_file)
+            transformer_info = {
+                row['transformer_id']: {
+                    'cord': (row['longitude'], row['latitude']),
+                    'load': row['total_load']
+                }
+                for _, row in df_transformers.iterrows()
+            }
+        
+        # Read and process transformer edge sequences
+        if transformer_edges_file.exists():
+            with open(transformer_edges_file, 'r') as f:
+                for line in f:
+                    # Parse line
+                    parts = line.strip().split()
+                    if len(parts) < 4:  # Skip invalid lines
+                        continue
+                    
+                    # Extract road link information
+                    start_node = int(parts[0])
+                    end_node = int(parts[1])
+                    edge_key = int(parts[2])
+                    node_sequence = [
+                        int(n) if not n.startswith('T') else n 
+                        for n in parts[3:]
+                    ]
+                    
+                    # Get original edge attributes
+                    if not road_network.has_edge(start_node, end_node, key=edge_key):
+                        continue
+                    
+                    edge_attrs = road_network.get_edge_data(start_node, end_node, edge_key)
+                    highway_type = edge_attrs.get('highway', 'unclassified')
+                    
+                    # Remove original edge if it exists in new graph
+                    if new_graph.has_edge(start_node, end_node, key=edge_key):
+                        new_graph.remove_edge(start_node, end_node, key=edge_key)
+                    
+                    # Add transformer nodes with standardized attributes
+                    for node in node_sequence:
+                        if isinstance(node, str) and node.startswith('T'):
+                            if node in transformer_info:
+                                new_graph.add_node(
+                                    node,
+                                    cord=transformer_info[node]['cord'],
+                                    label='T',  # Transformer node
+                                    load=transformer_info[node]['load']
+                                )
+                    
+                    # Add new edges between consecutive nodes
+                    for i in range(len(node_sequence) - 1):
+                        u, v = node_sequence[i], node_sequence[i + 1]
+                        
+                        # Get coordinates for nodes
+                        u_cord = new_graph.nodes[u]['cord']
+                        v_cord = new_graph.nodes[v]['cord']
+                        
+                        # Create geometry and calculate length
+                        if u_cord and v_cord:
+                            # Create LineString geometry
+                            geometry = LineString([u_cord, v_cord])
+                            
+                            # Calculate geodesic length
+                            length = geodesic(
+                                (u_cord[1], u_cord[0]),  # lat, lon
+                                (v_cord[1], v_cord[0])   # lat, lon
+                            ).meters
+                            
+                            # Add edge with attributes
+                            new_graph.add_edge(
+                                u, v,
+                                geometry=geometry,
+                                highway=highway_type,
+                                length=length
+                            )
+        
+        # Connect components
+        connected_new_graph = self.connect_network_components(new_graph)
+        
+        # Save the combined network
+        self.save_combined_network(connected_new_graph, prefix)
+        
+        return new_graph
+    
+    def connect_network_components(self, graph: nx.MultiGraph) -> nx.MultiGraph:
+        """
+        Connect components in the network, removing components without transformers
+        and connecting remaining components to the largest component.
+        
+        Args:
+            graph (nx.MultiGraph): Input network
+            
+        Returns:
+            nx.MultiGraph: Connected network
+        """
+        # Get connected components
+        components = list(nx.connected_components(graph))
+        if len(components) == 1:
+            logger.info("The combined network is a single connected component.")
+            return graph  # Already connected
+            
+        # Create a copy to modify
+        new_graph = graph.copy()
+        
+        # Filter components that have transformers
+        valid_components = []
+        for component in components:
+            has_transformer = any(
+                new_graph.nodes[n]['label'] == 'T' 
+                for n in component
+            )
+            if has_transformer:
+                valid_components.append(component)
+            else:
+                # Remove nodes from components without transformers
+                new_graph.remove_nodes_from(component)
+        logger.info("Removed unnecessary components without transformer nodes")
+        
+        if len(valid_components) <= 1:
+            logger.info("Found single connected component after removal of unnecessary components")
+            return new_graph  # No need to connect if only one valid component
+            
+        # Find the largest component
+        largest_component = max(valid_components, key=len)
+        other_components = [c for c in valid_components if c != largest_component]
+        
+        # Function to get road nodes from a component
+        def get_road_nodes(component):
+            return [n for n in component if new_graph.nodes[n]['label'] == 'R']
+        
+        # Function to calculate edge length between nodes
+        def calculate_edge_length(u, v):
+            u_cord = new_graph.nodes[u]['cord']
+            v_cord = new_graph.nodes[v]['cord']
+            # Calculate geodesic length
+            length = geodesic(
+                (u_cord[1], u_cord[0]),  # lat, lon
+                (v_cord[1], v_cord[0])   # lat, lon
+            ).meters
+            return length
+            
+        # Function to create edge geometry
+        def create_edge_geometry(u, v):
+            u_cord = new_graph.nodes[u]['cord']
+            v_cord = new_graph.nodes[v]['cord']
+            return LineString([u_cord, v_cord])
+        
+        # Get road nodes for the largest component
+        largest_road_nodes = get_road_nodes(largest_component)
+        
+        # Connect each other component to the largest component
+        for component in other_components:
+            component_road_nodes = get_road_nodes(component)
+            
+            # Find the minimum length connection
+            min_length = float('inf')
+            best_connection = None
+            
+            for u in largest_road_nodes:
+                for v in component_road_nodes:
+                    length = calculate_edge_length(u, v)
+                    if length < min_length:
+                        min_length = length
+                        best_connection = (u, v, length)
+            
+            if best_connection:
+                u, v, length = best_connection
+                # Add the connecting edge with attributes
+                geometry = create_edge_geometry(u, v)
+                logger.info(f"Adding edge {(u,v)} to connect components")
+                new_graph.add_edge(
+                    u, v,
+                    geometry=geometry,
+                    highway='unclassified',  # Default type for connecting edges
+                    length=length
+                )
+                
+        # Verify the graph is now connected
+        if not nx.is_connected(new_graph):
+            error_message = "Failed to create a connected network after adding connecting edges"
+            logger.error(error_message)
+            raise ValueError(error_message)
+        
+        return new_graph
 
-result = generator.generate_network(
-    graph=graph,
-    penalty=1.0,
-    max_rating=100,
-    max_hops=5,
-    road_link_id='RL001',
-    road_nodes=road_nodes
-)
+    def save_combined_network(self, graph: nx.MultiGraph, prefix: str) -> None:
+        """
+        Save combined network nodes and edges to separate CSV files.
+        
+        Args:
+            graph (nx.MultiGraph): Combined network graph
+            prefix (str): Prefix for output files
+        """
+        # Save nodes
+        node_data = []
+        for node, attrs in graph.nodes(data=True):
+            data = {'node_id': node}
+            if isinstance(node, str) and node.startswith('T'):
+                # Transformer node - already has cord attribute
+                data.update({
+                    'longitude': attrs['cord'][0],
+                    'latitude': attrs['cord'][1],
+                    'load': attrs['load'],
+                    'label': 'T'  # Use 'T' for transformer nodes
+                })
+            else:
+                # Road node - convert x,y to cord
+                data.update({
+                    'longitude': attrs.get('x'),
+                    'latitude': attrs.get('y'),
+                    'load': attrs.get('load', 0.0),
+                    'label': 'R'  # Use 'R' for road nodes
+                })
+            node_data.append(data)
+        
+        pd.DataFrame(node_data).to_csv(
+            self.output_dir / f"{prefix}_combined_network_nodes.csv",
+            index=False
+        )
+        
+        # Save edges
+        edge_data = []
+        for u, v, k, attrs in graph.edges(data=True, keys=True):
+            edge_data.append({
+                'from_node': u,
+                'to_node': v,
+                'key': k,
+                'highway': attrs.get('highway', 'unclassified'),
+                'length': attrs.get('length', 0.0),
+                'geometry': attrs.get('geometry', None)
+            })
+        
+        pd.DataFrame(edge_data).to_csv(
+            self.output_dir / f"{prefix}_combined_network_edges.csv",
+            index=False
+        )
 
-# If only T1 and T3 are selected in the optimization:
-# updated_road_nodes would be ['R1', 'T1001', 'R2', 'T1002', 'R3']
-# transformer_road_edges would contain: [('R1', 'T1001'), ('T1001', 'R2'), ('R2', 'T1002'), ('T1002', 'R3')]
+def load_combined_network(
+    nodes_file: str, 
+    edges_file: str
+    ) -> nx.MultiGraph:
+    """
+    Load combined network from saved CSV files with all attributes.
+    
+    Args:
+        nodes_file (str): CSV file with node attributes
+        edges_file (str): CSV file with edge attributes
+        
+    Returns:
+        nx.MultiGraph: Reconstructed network with all attributes
+        
+    Raises:
+        FileNotFoundError: If either nodes or edges file is not found
+    """
+    
+    if not Path(nodes_file).exists():
+        raise FileNotFoundError(f"Nodes file not found: {nodes_file}")
+    if not Path(edges_file).exists():
+        raise FileNotFoundError(f"Edges file not found: {edges_file}")
+    
+    # Create new graph
+    graph = nx.MultiGraph()
+    
+    # Load nodes
+    df_nodes = pd.read_csv(nodes_file)
+    for _, row in df_nodes.iterrows():
+        node_id = row['node_id']
+        # Convert node_id to proper type (int for road nodes, str for transformers)
+        if isinstance(node_id, str) and not node_id.startswith('T'):
+            node_id = int(node_id)
+        
+        # Create standardized node attributes
+        node_attrs = {
+            'cord': (row['longitude'], row['latitude']),
+            'load': row['load'],
+            'label': row['label']  # 'R' for road nodes, 'T' for transformer nodes
+        }
+        
+        graph.add_node(node_id, **node_attrs)
+    
+    # Load edges
+    df_edges = pd.read_csv(edges_file)
+    for _, row in df_edges.iterrows():
+        # Convert node IDs to proper type
+        from_node = row['from_node']
+        to_node = row['to_node']
+        key = row['key']
+        
+        # Convert road node IDs to int
+        if isinstance(from_node, str) and not from_node.startswith('T'):
+            from_node = int(from_node)
+        if isinstance(to_node, str) and not to_node.startswith('T'):
+            to_node = int(to_node)
+        
+        # Handle geometry conversion from string to LineString
+        geometry_str = row['geometry']
+        if isinstance(geometry_str, str):
+            # Parse the geometry string
+            # Example format: "LINESTRING (lon1 lat1, lon2 lat2)"
+            coords_str = geometry_str.replace('LINESTRING (', '').replace(')', '')
+            coords_pairs = coords_str.split(', ')
+            coords = [
+                tuple(map(float, pair.split())) 
+                for pair in coords_pairs
+            ]
+            geometry = LineString(coords)
+        else:
+            # If geometry is missing, create from node coordinates
+            from_cord = graph.nodes[from_node]['cord']
+            to_cord = graph.nodes[to_node]['cord']
+            if from_cord and to_cord:
+                geometry = LineString([from_cord, to_cord])
+            else:
+                geometry = None
+        
+        # Add edge with attributes
+        graph.add_edge(
+            from_node,
+            to_node,
+            key=key,
+            geometry=geometry,
+            highway=row['highway'],
+            length=row['length']
+        )
+    
+    return graph
 
-generator.save_results(prefix="region1")
-"""
+def _get_node_coord(
+    graph: nx.MultiGraph,
+    node: Union[int, str]
+) -> Tuple[float, float]:
+    """
+    Get coordinate tuple for a node from its attributes.
+    
+    Args:
+        graph (nx.MultiGraph): Network graph
+        node (Union[int, str]): Node identifier
+        
+    Returns:
+        Tuple[float, float]: (longitude, latitude) coordinates or None if not found
+    """
+    attrs = graph.nodes[node]
+    if isinstance(node, str) and node.startswith('T'):
+        return attrs.get('cord')
+    else:
+        x = attrs.get('x')
+        y = attrs.get('y')
+        if x is not None and y is not None:
+            return (x, y)
+    return None

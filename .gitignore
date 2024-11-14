@@ -5,6 +5,9 @@ gurobi
 tests/__pycache__
 logs
 results
+
+# Generated Files
 *.png
 *.csv
 *.txt
+*.json
