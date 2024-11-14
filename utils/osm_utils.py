@@ -135,7 +135,7 @@ def load_road_network_from_files(edgelist_file: str = 'road_network_edges.csv',
         nodelist_file (str): Path to the nodelist file.
 
     Returns:
-        nx.MultiDiGraph: The loaded road network graph.
+        nx.MultiGraph: The loaded road network graph.
 
     Raises:
         FileNotFoundError: If either file doesn't exist.
@@ -151,7 +151,7 @@ def load_road_network_from_files(edgelist_file: str = 'road_network_edges.csv',
         logger.error(f"Nodelist file not found: {nodelist_file}")
         raise FileNotFoundError(f"The file {nodelist_file} does not exist.")
     
-    G = nx.MultiDiGraph()
+    G = nx.MultiGraph()
     
     # Load nodes first
     with open(nodelist_file, 'r', newline='') as f:
