@@ -348,32 +348,6 @@ class SecondaryNetworkGenerator:
         """
         self._session_files.clear()
 
-    def _get_node_coordinates(
-        self,
-        graph: nx.MultiGraph,
-        node: Any,
-        transformer_info: Dict
-    ) -> Tuple[float, float]:
-        """
-        Get coordinates for a node from either graph attributes or transformer info.
-        
-        Args:
-            graph (nx.MultiGraph): Network graph
-            node: Node identifier
-            transformer_info (Dict): Dictionary of transformer information
-            
-        Returns:
-            Tuple[float, float]: (longitude, latitude) coordinates or None if not found
-        """
-        if isinstance(node, str) and node.startswith('T'):
-            # Transformer node
-            return transformer_info.get(node, {}).get('cord')
-        else:
-            # Road network node
-            if 'x' in graph.nodes[node] and 'y' in graph.nodes[node]:
-                return (graph.nodes[node]['x'], graph.nodes[node]['y'])
-        return None
-
     def combine_networks(
         self,
         road_network: nx.MultiGraph,
@@ -395,6 +369,15 @@ class SecondaryNetworkGenerator:
         
         # Create new graph
         new_graph = road_network.copy()
+        
+        # First, add all road network nodes with standardized attributes
+        for node, attrs in road_network.nodes(data=True):
+            new_graph.add_node(
+                node,
+                cord=(attrs['x'], attrs['y']),  # Convert x,y to cord
+                label='R',  # Road node
+                load=0.0    # Road nodes have zero load
+            )
         
         # Read transformer information
         transformer_info = {}
@@ -427,22 +410,24 @@ class SecondaryNetworkGenerator:
                     ]
                     
                     # Get original edge attributes
-                    if not new_graph.has_edge(start_node, end_node, key=edge_key):
+                    if not road_network.has_edge(start_node, end_node, key=edge_key):
                         continue
                     
-                    edge_attrs = new_graph.get_edge_data(start_node, end_node, edge_key)
+                    edge_attrs = road_network.get_edge_data(start_node, end_node, edge_key)
                     highway_type = edge_attrs.get('highway', 'unclassified')
                     
-                    # Remove original edge
-                    new_graph.remove_edge(start_node, end_node, key=edge_key)
+                    # Remove original edge if it exists in new graph
+                    if new_graph.has_edge(start_node, end_node, key=edge_key):
+                        new_graph.remove_edge(start_node, end_node, key=edge_key)
                     
-                    # Add transformer nodes with attributes
+                    # Add transformer nodes with standardized attributes
                     for node in node_sequence:
                         if isinstance(node, str) and node.startswith('T'):
                             if node in transformer_info:
                                 new_graph.add_node(
                                     node,
                                     cord=transformer_info[node]['cord'],
+                                    label='T',  # Transformer node
                                     load=transformer_info[node]['load']
                                 )
                     
@@ -451,9 +436,10 @@ class SecondaryNetworkGenerator:
                         u, v = node_sequence[i], node_sequence[i + 1]
                         
                         # Get coordinates for nodes
-                        u_cord = self._get_node_coordinates(new_graph, u, transformer_info)
-                        v_cord = self._get_node_coordinates(new_graph, v, transformer_info)
+                        u_cord = new_graph.nodes[u]['cord']
+                        v_cord = new_graph.nodes[v]['cord']
                         
+                        # Create geometry and calculate length
                         if u_cord and v_cord:
                             # Create LineString geometry
                             geometry = LineString([u_cord, v_cord])
@@ -472,13 +458,112 @@ class SecondaryNetworkGenerator:
                                 length=length
                             )
         
-        # Ensure all road nodes have load=0.0
-        for node in new_graph.nodes():
-            if not isinstance(node, str) or not node.startswith('T'):
-                new_graph.nodes[node]['load'] = 0.0
+        # Connect components
+        connected_new_graph = self.connect_network_components(new_graph)
         
         # Save the combined network
-        self.save_combined_network(new_graph, prefix)
+        self.save_combined_network(connected_new_graph, prefix)
+        
+        return new_graph
+    
+    def connect_network_components(self, graph: nx.MultiGraph) -> nx.MultiGraph:
+        """
+        Connect components in the network, removing components without transformers
+        and connecting remaining components to the largest component.
+        
+        Args:
+            graph (nx.MultiGraph): Input network
+            
+        Returns:
+            nx.MultiGraph: Connected network
+        """
+        # Get connected components
+        components = list(nx.connected_components(graph))
+        if len(components) == 1:
+            logger.info("The combined network is a single connected component.")
+            return graph  # Already connected
+            
+        # Create a copy to modify
+        new_graph = graph.copy()
+        
+        # Filter components that have transformers
+        valid_components = []
+        for component in components:
+            has_transformer = any(
+                new_graph.nodes[n]['label'] == 'T' 
+                for n in component
+            )
+            if has_transformer:
+                valid_components.append(component)
+            else:
+                # Remove nodes from components without transformers
+                new_graph.remove_nodes_from(component)
+        logger.info("Removed unnecessary components without transformer nodes")
+        
+        if len(valid_components) <= 1:
+            logger.info("Found single connected component after removal of unnecessary components")
+            return new_graph  # No need to connect if only one valid component
+            
+        # Find the largest component
+        largest_component = max(valid_components, key=len)
+        other_components = [c for c in valid_components if c != largest_component]
+        
+        # Function to get road nodes from a component
+        def get_road_nodes(component):
+            return [n for n in component if new_graph.nodes[n]['label'] == 'R']
+        
+        # Function to calculate edge length between nodes
+        def calculate_edge_length(u, v):
+            u_cord = new_graph.nodes[u]['cord']
+            v_cord = new_graph.nodes[v]['cord']
+            # Calculate geodesic length
+            length = geodesic(
+                (u_cord[1], u_cord[0]),  # lat, lon
+                (v_cord[1], v_cord[0])   # lat, lon
+            ).meters
+            return length
+            
+        # Function to create edge geometry
+        def create_edge_geometry(u, v):
+            u_cord = new_graph.nodes[u]['cord']
+            v_cord = new_graph.nodes[v]['cord']
+            return LineString([u_cord, v_cord])
+        
+        # Get road nodes for the largest component
+        largest_road_nodes = get_road_nodes(largest_component)
+        
+        # Connect each other component to the largest component
+        for component in other_components:
+            component_road_nodes = get_road_nodes(component)
+            
+            # Find the minimum length connection
+            min_length = float('inf')
+            best_connection = None
+            
+            for u in largest_road_nodes:
+                for v in component_road_nodes:
+                    length = calculate_edge_length(u, v)
+                    if length < min_length:
+                        min_length = length
+                        best_connection = (u, v, length)
+            
+            if best_connection:
+                u, v, length = best_connection
+                # Add the connecting edge with attributes
+                geometry = create_edge_geometry(u, v)
+                logger.info(f"Adding edge {(u,v)} to connect components")
+                new_graph.add_edge(
+                    u, v,
+                    geometry=geometry,
+                    highway='unclassified',  # Default type for connecting edges
+                    length=length
+                )
+                
+        # Verify the graph is now connected
+        if not nx.is_connected(new_graph):
+            error_message = "Failed to create a connected network after adding connecting edges"
+            logger.error(error_message)
+            raise ValueError(error_message)
         
         return new_graph
 
@@ -495,20 +580,20 @@ class SecondaryNetworkGenerator:
         for node, attrs in graph.nodes(data=True):
             data = {'node_id': node}
             if isinstance(node, str) and node.startswith('T'):
-                # Transformer node
+                # Transformer node - already has cord attribute
                 data.update({
                     'longitude': attrs['cord'][0],
                     'latitude': attrs['cord'][1],
                     'load': attrs['load'],
-                    'label': 'T'
+                    'label': 'T'  # Use 'T' for transformer nodes
                 })
             else:
-                # Road node
+                # Road node - convert x,y to cord
                 data.update({
                     'longitude': attrs.get('x'),
                     'latitude': attrs.get('y'),
                     'load': attrs.get('load', 0.0),
-                    'label': 'R'
+                    'label': 'R'  # Use 'R' for road nodes
                 })
             node_data.append(data)
         
@@ -568,22 +653,14 @@ def load_combined_network(
         if isinstance(node_id, str) and not node_id.startswith('T'):
             node_id = int(node_id)
         
-        if row['label'] == 'T':
-            # Transformer node attributes
-            graph.add_node(
-                node_id,
-                cord=(row['longitude'], row['latitude']),
-                load=row['load'],
-                label='T'
-            )
-        else:
-            # Road node attributes
-            graph.add_node(
-                node_id,
-                cord=(row['longitude'], row['latitude']),
-                load=row['load'],
-                label='R'
-            )
+        # Create standardized node attributes
+        node_attrs = {
+            'cord': (row['longitude'], row['latitude']),
+            'load': row['load'],
+            'label': row['label']  # 'R' for road nodes, 'T' for transformer nodes
+        }
+        
+        graph.add_node(node_id, **node_attrs)
     
     # Load edges
     df_edges = pd.read_csv(edges_file)
@@ -613,10 +690,10 @@ def load_combined_network(
             geometry = LineString(coords)
         else:
             # If geometry is missing, create from node coordinates
-            from_coord = _get_node_coord(graph, from_node)
-            to_coord = _get_node_coord(graph, to_node)
-            if from_coord and to_coord:
-                geometry = LineString([from_coord, to_coord])
+            from_cord = graph.nodes[from_node]['cord']
+            to_cord = graph.nodes[to_node]['cord']
+            if from_cord and to_cord:
+                geometry = LineString([from_cord, to_cord])
             else:
                 geometry = None
         
