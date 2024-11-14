@@ -23,3 +23,7 @@ secnet:
     penalty: 0.5
     max_rating: 25000
     max_hops: 10
+
+partitioning:
+  padding: 0.001
+  assignment_json: "out/interim/test_transformer_assignment.json"
