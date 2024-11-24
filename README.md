@@ -38,15 +38,14 @@ git clone https://github.com/yourusername/syngrid.git
 cd syngrid
 ```
 
-2. Create a virtual environment:
+2. Create a virtual environment and install dependencies:
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+conda env create -f syndist.yml
 ```
 
-3. Install dependencies:
+3. Activate environment:
 ```bash
-pip install -r requirements.txt
+conda activate synth
 ```
 
 ## 📦 Dependencies
