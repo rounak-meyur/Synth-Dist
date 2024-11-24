@@ -1,6 +1,7 @@
 from typing import Dict, List, Tuple, Callable
 import networkx as nx
 import numpy as np
+from geopy.distance import geodesic
 from pyqtree import Index
 import json
 from pathlib import Path
@@ -204,7 +205,7 @@ class NetworkPartitioner:
         substation_nodes: Dict[int, int]
     ) -> Dict[int, List[str]]:
         """
-        Assign transformers to nearest substation based on network distance.
+        Assign transformers to substations using Voronoi partitioning based on network distances.
         
         Args:
             substation_nodes (Dict[int, int]): Mapping of substation ID to road node ID
@@ -212,82 +213,121 @@ class NetworkPartitioner:
         Returns:
             Dict[int, List[str]]: Mapping of substation ID to list of assigned transformer IDs
         """
-        # Get all transformer nodes
-        transformer_nodes = [
-            node for node, attrs in self.network.nodes(data=True)
-            if attrs['label'] == 'T'
-        ]
+        # Extract center nodes for Voronoi partitioning
+        centers = list(substation_nodes.values())
         
-        # Initialize assignments dictionary
-        assignments = {sub_id: [] for sub_id in substation_nodes.keys()}
+        # First Voronoi partitioning
+        cells = nx.voronoi_cells(self.network, centers, 'length')
         
-        # Calculate shortest paths from each transformer to all substation nodes
-        for transformer in transformer_nodes:
-            min_distance = float('inf')
-            assigned_substation = None
+        # Filter centers with significant cells
+        valid_centers = [c for c in centers if len(cells[c]) > 100]
+        if not valid_centers:
+            logger.error("No valid centers found after filtering")
+            raise ValueError("No valid centers found after filtering")
+        
+        # Recompute Voronoi cells with valid centers
+        cells = nx.voronoi_cells(self.network, valid_centers, 'length')
+        
+        # Create assignments dictionary
+        assignments = {
+            sub_id: []
+            for sub_id, node in substation_nodes.items()
+            if node in valid_centers
+        }
+        
+        # Assign transformers based on cell membership
+        for center_node in valid_centers:
+            # Find corresponding substation ID
+            sub_id = next(
+                sid for sid, node in substation_nodes.items() 
+                if node == center_node
+            )
             
-            # Calculate shortest path to each substation
-            for sub_id, road_node in substation_nodes.items():
-                try:
-                    path_length = nx.shortest_path_length(
-                        self.network,
-                        source=transformer,
-                        target=road_node,
-                        weight='length'
-                    )
-                    
-                    if path_length < min_distance:
-                        min_distance = path_length
-                        assigned_substation = str(sub_id)
-                
-                except nx.NetworkXNoPath:
-                    logger.error(f"No path exists between {road_node} and {transformer}")
-                    continue
-            
-            if assigned_substation is not None:
-                assignments[assigned_substation].append(transformer)
-            else:
-                err_msg = f"No valid path found from transformer {transformer} to any substation"
-                logger.error(err_msg)
-                raise ValueError(err_msg)
+            assignments[sub_id] = list(cells[center_node])
         
         return assignments
     
     def save_partitioning(
         self,
         assignments: Dict[int, List[str]],
+        subs: List[Substation],
         output_file: str
     ) -> None:
         """
-        Save transformer-substation assignments to JSON file.
+        Save transformer-substation assignments to JSON file with node and edge information
+        from induced subgraphs.
         
         Args:
-            assignments (Dict[int, List[str]]): Mapping of substation IDs to transformer lists
+            assignments (Dict[int, List[str]]): Mapping of substation IDs to transformer and road node lists
+            substations (List[Substation]): List of substations
             output_file (str): Path to output JSON file
         """
         # Create output directory if it doesn't exist
         output_path = Path(output_file)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Convert all keys to strings for JSON compatibility
-        json_data = {str(sub_id): transformers 
-                    for sub_id, transformers in assignments.items()}
+        # Create structured data for JSON
+        partitioned_data = {}
+        
+        for sub in subs:
+            # Get substation coordinates
+            sub_cord = sub.cord
+            sub_id = str(sub.id)
+            
+            if sub_id not in assignments:
+                logger.info(f"No nodes assigned to {sub_id}")
+            
+            else:
+                partition_nodes = assignments[sub_id]
+            
+                # Get induced subgraph
+                subgraph = self.network.subgraph(partition_nodes)
+                
+                # Create node list with attributes
+                nodelist = {}
+                for node, attrs in subgraph.nodes(data=True):
+                    nodelist[str(node)] = {
+                        "cord": attrs['cord'],
+                        "label": attrs['label'],
+                        "load": attrs['load'],
+                        "distance": geodesic(
+                            (sub_cord[1], sub_cord[0]),
+                            (attrs['cord'][1], attrs['cord'][0])
+                        ).meters if attrs['label'] == 'R' else 999999999
+                    }
+                
+                # Create edge list with attributes
+                edgelist = {}
+                for u, v, k, data in subgraph.edges(data=True, keys=True):
+                    edge_key = f"({u},{v},{k})"  # Create string key for JSON
+                    edgelist[edge_key] = {
+                        "highway": data.get('highway', 'unclassified'),
+                        "geometry": str(data.get('geometry')),  # Convert LineString to string
+                        "length": data.get('length', 0.0)
+                    }
+                
+                # Store partition data
+                partitioned_data[str(sub_id)] = {
+                    "nodelist": nodelist,
+                    "edgelist": edgelist
+                }
         
         # Save to JSON file
         with open(output_path, 'w') as f:
-            json.dump(json_data, f, indent=2)
+            json.dump(partitioned_data, f, indent=2)
+
 
 def load_partitioning(
     input_file: str
-    ) -> Dict[int, List[str]]:
+    ) -> Dict[int, Dict[str, Dict]]:
     """
-    Load transformer-substation assignments from JSON file.
+    Load transformer graph-substation assignments from JSON file.
     
     Args:
         input_file (str): Path to input JSON file
         
     Returns:
-        Dict[int, List[str]]: Mapping of substation IDs (int) to transformer IDs (str)
+        Dict[int, Dict[str, Dict]]: Mapping of substation IDs (int) to transformer graph data (dict)
         
     Raises:
         FileNotFoundError: If input file doesn't exist
@@ -303,32 +343,18 @@ def load_partitioning(
         
         # Convert substation IDs from strings back to integers
         assignments = {}
-        for sub_id_str, transformers in json_data.items():
+        for sub_id_str, graph_data in json_data.items():
             # Validate substation ID
             try:
                 sub_id = int(sub_id_str)
             except ValueError:
+                logger.error(f"Expected integer format for substation ID {sub_id_str}")
                 raise ValueError(
                     f"Invalid substation ID format: {sub_id_str}. "
                     "Expected integer."
                 )
             
-            # Validate transformer IDs
-            if not isinstance(transformers, list):
-                raise ValueError(
-                    f"Invalid transformer list for substation {sub_id}: "
-                    f"{transformers}. Expected list."
-                )
-            
-            # Verify transformer format
-            for t_id in transformers:
-                if not isinstance(t_id, str) or not t_id.startswith('T'):
-                    raise ValueError(
-                        f"Invalid transformer ID format: {t_id}. "
-                        "Expected string starting with 'T'."
-                    )
-            
-            assignments[sub_id] = transformers
+            assignments[sub_id] = graph_data
         
         return assignments
         
