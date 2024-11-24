@@ -128,17 +128,39 @@ def main():
                 subs,
                 search_radius=conf["partitioning"]["padding"]
             )
-            transformer_assignements = partitioner.partition_transformers(substation_nodes)
+            assignments = partitioner.partition_transformers(substation_nodes)
             partitioner.save_partitioning(
-                transformer_assignements, 
+                assignments, 
+                subs, 
                 output_file=assignment_json
                 )
         except ValueError as e:
-            logger.error(f"Error ocurred while partitioning: {e}")
+            logger.error(f"Error occurred while partitioning: {e}")
     else:
         from utils.partition_utils import load_partitioning
-        substation_nodes = load_partitioning(assignment_json)
-    logger.info(f"Transformer partitioning complete in {time.time()-ts} seconds.")
+        partition_data = load_partitioning(assignment_json)
+    logger.info(f"Transformer partitioning and partition data loading complete in {time.time()-ts} seconds.")
+    
+    # Create primary network sequentially for all substation partitioned data
+    from utils.primnet_utils import PrimaryNetworkGenerator
+    primnet_config = conf["primnet"]["primnet_args"]
+    
+    for sub in subs:
+        if int(sub.id) not in partition_data:
+            logger.info(f"No nodes mapped to the substation {sub.id}")
+        else:
+            primnet_edge_csv = f"{conf['primnet']['out_dir']}test_{sub.id}_edges.csv"
+            primnet_node_csv = f"{conf['primnet']['out_dir']}test_{sub.id}_nodes.csv"
+            if not os.path.exists(primnet_edge_csv) or not os.path.exists(primnet_node_csv):
+                generator = PrimaryNetworkGenerator(output_dir=conf["primnet"]["out_dir"])
+                generator.generate_network_for_substation(
+                    sub, 
+                    assignment = partition_data[int(sub.id)],
+                    config=primnet_config
+                    )
+                generator.export_to_csv(prefix=f"test_{str(sub.id)}")
+            else:
+                logger.info(f"Primary network already generated and saved for substation {sub.id}")
     
 if __name__ == "__main__":
     main()
