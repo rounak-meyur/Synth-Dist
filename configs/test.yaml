@@ -27,3 +27,19 @@ secnet:
 partitioning:
   padding: 0.001
   assignment_json: "out/interim/test_transformer_assignment.json"
+
+primnet:
+  out_dir: "out/primnet/"
+  primnet_args:
+    voltage_max: 1.05
+    voltage_min: 0.90
+    maximum_voltage_drop: 0.15
+    conductor_resistance_per_km: 0.8625
+    base_impedance: 39690
+    maximum_branch_flow: 400
+    max_feeder_number: 10
+    max_feeder_capacity: 400
+    relative_gap: 0.05
+    verbose: true
+    warm_start: true
+    threads: 0
