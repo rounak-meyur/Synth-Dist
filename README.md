@@ -1,33 +1,50 @@
 # SYNGRID: Synthetic Distribution Grid Generator
 
+
+[![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 ## 📝 Description
 SYNGRID is a Python-based toolkit for generating synthetic electrical distribution networks that mirror the characteristics of real-world power distribution systems. The toolkit uses geospatial data, demographic information, and power system constraints to create realistic secondary distribution networks for specified regions.
 
 ## 🎯 Key Features
-- Optimization-based secondary distribution network generation
-- Geospatial integration with real-world coordinates
-- Power flow constraints consideration
-- Customizable network parameters
-- Detailed logging system for tracking network generation process
-- Support for multiple regions and scales
+
+- **Optimized Network Generation**:
+  - Secondary network optimization with transformer placement
+  - Primary feeder optimization with voltage and power flow constraints
+  - Multi-stage optimization for large-scale networks
+
+- **Geospatial Integration**:
+  - Integration with OpenStreetMap for road network data
+  - Real-world coordinate system support
+  - Automated mapping of homes to road networks
+
+- **Network Partitioning**:
+  - Voronoi-based network partitioning
+  - Automated substation service area determination
+  - Load-based transformer placement
 
 ## 🏗️ Project Structure
 ```
 syngrid/
-├── configs/
-│   ├── logging_config.ini      # Logging configuration
-│   └── config.yaml            # Main configuration file
-├── logs/                      # Log files directory
-├── utils/
-│   ├── __init__.py
-│   └── logging_utils.py       # Logging utilities
-├── models/
-│   ├── __init__.py
-│   └── secnet.py             # Secondary network optimization model
-├── docs/
-│   └── secondary_network.pdf  # Technical documentation
-├── tests/                    # Test files
-├── requirements.txt          # Project dependencies
+├── models/                  # Core optimization models
+│   ├── primnet.py           # Primary network optimization
+│   └── secnet.py            # Secondary network optimization
+├── utils/                   # Utility functions
+│   ├── dataloader.py        # Data loading utilities
+│   ├── drawings.py          # Visualization functions
+│   ├── logging_utils.py     # Logging configuration
+│   ├── mapping.py           # Geospatial mapping utilities
+│   ├── osm_utils.py         # OpenStreetMap integration
+│   ├── partition_utils.py   # Network partitioning
+│   ├── primnet_utils.py     # Primary network utilities
+│   └── secnet_utils.py      # Secondary network utilities
+├── configs/                 # Configuration files
+├── data/                    # Input data directory
+├── figs/                    # Output figures
+├── logs/                    # Log files
+├── main.py                  # Main execution script
+├── syndist.yml              # Conda environment file
 └── README.md                # This file
 ```
 
@@ -54,39 +71,90 @@ conda activate synth
 - CVXPY
 - PySCIPOpt
 - NumPy
-- Other dependencies listed in requirements.txt
+- Other dependencies listed in `syndist.yml`
 
 ## 🚀 Usage
-Here's a basic example of generating a secondary distribution network:
 
-```python
-from models.secnet import create_secondary_distribution_network
-import networkx as nx
+1. Prepare your input data:
+   - Home locations and load data (CSV)
+   - Substation locations (CSV)
+   - Configuration file (YAML)
 
-# Create input graph with required attributes
-graph = nx.Graph()
-
-# Add nodes (homes and transformers)
-graph.add_node(1, cord=(longitude1, latitude1), load=5.5, label='H')
-graph.add_node(2, cord=(longitude2, latitude2), load=0, label='T')
-
-# Add potential edges
-graph.add_edge(1, 2, length=100, crossing=0.5)
-
-# Generate optimized network
-result = create_secondary_distribution_network(
-    graph=graph,
-    penalty=1.0,
-    max_rating=100,
-    max_hops=5
-)
+2. Run the main script:
+```bash
+python main.py -c configs/your_config.yaml
 ```
 
-## 📊 Network Optimization Parameters
-- `penalty`: Cost multiplier for edge crossings
-- `max_rating`: Maximum power rating for transformers
-- `max_hops`: Maximum allowed hops from transformer to home
-- Edge cost = `length + (penalty * crossing)`
+To generate visualization plots, add the `-p` flag:
+```bash
+python main.py -c configs/your_config.yaml -p
+```
+
+## 📊 Configuration file
+
+The program uses YAML configuration files with the following key sections:
+
+```yaml
+inputs:
+  home_csv: "path/to/homes.csv"
+  substation_csv: "path/to/substations.csv"
+
+mapping:
+  padding: 0.005
+  home_to_road: "path/to/mapping.txt"
+
+secnet:
+  out_dir: "path/to/output/"
+  out_prefix: "network"
+  base_transformer_id: 1
+  secnet_args:
+    separation: 50.0
+    penalty: 0.5
+    max_rating: 25000
+    max_hops: 10
+
+primnet:
+  out_dir: "path/to/output/"
+  primnet_args:
+    voltage_max: 1.05
+    voltage_min: 0.95
+    maximum_voltage_drop: 0.05
+    conductor_resistance_per_km: 0.2
+    base_impedance: 1.0
+    maximum_branch_flow: 1000
+    max_feeder_number: 10
+    max_feeder_capacity: 1000
+```
+
+## Input Data Format
+
+### Homes CSV
+```csv
+hid,longitude,latitude,hour1,hour2,...,hour24
+1,-73.985,40.748,5.2,4.8,...,6.1
+```
+
+### Substations CSV
+```csv
+ID,X,Y
+SUB1,-73.982,40.745
+```
+
+## Output Files
+
+The program generates several output files:
+
+- **Secondary Network**:
+  - `{prefix}_transformers.csv`: Transformer locations and loads
+  - `{prefix}_secondary_edges.csv`: Secondary network connections
+  - `{prefix}_road_transformer_edges.txt`: Road-transformer sequences
+
+- **Primary Network**:
+  - `{substation_id}_nodes.csv`: Primary network nodes
+  - `{substation_id}_edges.csv`: Primary network connections
+
+- **Visualizations** (with `-p` flag):
+  - Network plots in the `figs/` directory
 
 ## 🔍 Logging
 The project uses a comprehensive logging system:
@@ -112,6 +180,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 🙏 Acknowledgments
 - SCIP Optimization Suite
 - NetworkX developers
+- OpenStreetMap contributors
 - All contributors to this project
 
 ## 📞 Contact
@@ -120,7 +189,6 @@ For questions and feedback:
 - Issue Tracker: [GitHub Issues](https://github.com/rounak-meyur/SynthDist/issues)
 
 ## 🗺️ Roadmap
-- [ ] Add support for primary distribution network generation
 - [ ] Implement parallel optimization for large networks
 - [ ] Add visualization tools
 - [ ] Include more realistic power flow constraints
@@ -130,10 +198,14 @@ For questions and feedback:
 ## 📚 Citation
 If you use this software in your research, please cite:
 ```bibtex
-@software{syngrid2024,
-  title = {SYNGRID: Synthetic Grid Distribution Network Generator},
-  author = {[Your Name]},
-  year = {2024},
-  url = {https://github.com/yourusername/syngrid}
+@article{pnas2022,
+  author = {Rounak Meyur  and Anil Vullikanti  and Samarth Swarup  and Henning S. Mortveit  and Virgilio Centeno  and Arun Phadke  and H. Vincent Poor  and Madhav V. Marathe },
+  title = {Ensembles of realistic power distribution networks},
+  journal = {Proceedings of the National Academy of Sciences},
+  volume = {119},
+  number = {42},
+  pages = {e2205772119},
+  year = {2022},
+  url = {https://doi.org/10.1073/pnas.2205772119}
 }
 ```
