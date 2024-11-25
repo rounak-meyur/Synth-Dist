@@ -19,10 +19,11 @@ def main():
     args = parser.parse_args()
     configpath = args.configPath
     conf = OmegaConf.load(configpath)
+    region = conf["region"]
 
     from utils.logging_utils import LogManager
     LogManager.initialize(
-        log_file_path=conf["logging"]["log_file"], 
+        log_file_path=f"{conf['miscellaneous']['log_dir']}application_{region}.log", 
         log_config_path="configs/logging_config.ini"
     )
     logger = LogManager.get_logger("__main__")
@@ -32,8 +33,7 @@ def main():
     from utils.dataloader import load_homes, load_substations
     from utils.osm_utils import load_roads, save_road_network, load_road_network_from_files
 
-    region = conf["region"]
-    input_home_csv = conf["inputs"]["home_csv"]
+    input_home_csv = f"{conf['inputs']['home_csv_dir']}{region}-home-load.csv"
     input_sub_csv = conf["inputs"]["substation_csv"]
     homes = load_homes(file_path=input_home_csv)
     subs = load_substations(file_path=input_sub_csv, homes=homes)
@@ -121,7 +121,7 @@ def main():
 
     # Partition transformer nodes to the nearest reachable substation
     ts = time.time()
-    assignment_json = conf["partitioning"]["assignment_json"]
+    assignment_json = f"{conf['miscellaneous']['intermediate_dir']}{region}_transformer_assignment.json"
     if not os.path.exists(assignment_json):
         from utils.partition_utils import NetworkPartitioner
         partitioner = NetworkPartitioner(combined_network)
@@ -129,7 +129,7 @@ def main():
             # Find nearest road nodes - will automatically retry with increased radius if needed
             substation_nodes = partitioner.find_nearest_road_nodes(
                 subs,
-                search_radius=conf["partitioning"]["padding"]
+                search_radius=conf["miscellaneous"]["padding"]
             )
             assignments = partitioner.partition_transformers(substation_nodes)
             partitioner.save_partitioning(

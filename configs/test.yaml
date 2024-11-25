@@ -1,13 +1,11 @@
 region: test
 
 inputs:
-  home_csv: "data/load/test-home-load.csv"
+  home_csv_dir: "data/load/"
   substation_csv: "data/substations.csv"
 
-logging:
-  log_file: "logs/application_test.log"
-
 miscellaneous:
+  log_dir: "logs/"
   intermediate_dir: "out/interim/"
   mapping_dir: "out/mapping/"
   padding: 0.001
@@ -20,10 +18,6 @@ secnet:
     penalty: 0.5
     max_rating: 25000
     max_hops: 10
-
-partitioning:
-  padding: 0.001
-  assignment_json: "out/interim/test_transformer_assignment.json"
 
 primnet:
   out_dir: "out/primnet/"

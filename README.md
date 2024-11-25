@@ -95,18 +95,21 @@ python main.py -c configs/your_config.yaml -p
 The program uses YAML configuration files with the following key sections:
 
 ```yaml
-inputs:
-  home_csv: "path/to/homes.csv"
-  substation_csv: "path/to/substations.csv"
+region: test
 
-mapping:
-  padding: 0.005
-  home_to_road: "path/to/mapping.txt"
+inputs:
+  home_csv_dir: "data/load/"
+  substation_csv: "data/substations.csv"
+
+miscellaneous:
+  log_dir: "logs/"
+  intermediate_dir: "out/interim/"
+  mapping_dir: "out/mapping/"
+  padding: 0.001
 
 secnet:
-  out_dir: "path/to/output/"
-  out_prefix: "network"
-  base_transformer_id: 1
+  out_dir: "out/secnet/"
+  base_transformer_id: 51121000000000000
   secnet_args:
     separation: 50.0
     penalty: 0.5
@@ -114,16 +117,17 @@ secnet:
     max_hops: 10
 
 primnet:
-  out_dir: "path/to/output/"
+  out_dir: "out/primnet/"
   primnet_args:
     voltage_max: 1.05
-    voltage_min: 0.95
-    maximum_voltage_drop: 0.05
-    conductor_resistance_per_km: 0.2
-    base_impedance: 1.0
-    maximum_branch_flow: 1000
+    voltage_min: 0.90
+    maximum_voltage_drop: 0.15
+    conductor_resistance_per_km: 0.8625
+    base_impedance: 39690
+    maximum_branch_flow: 400
     max_feeder_number: 10
-    max_feeder_capacity: 1000
+    max_feeder_capacity: 400
+    relative_gap: 0.05
 ```
 
 ## Input Data Format
@@ -145,9 +149,9 @@ SUB1,-73.982,40.745
 The program generates several output files:
 
 - **Secondary Network**:
-  - `{prefix}_transformers.csv`: Transformer locations and loads
-  - `{prefix}_secondary_edges.csv`: Secondary network connections
-  - `{prefix}_road_transformer_edges.txt`: Road-transformer sequences
+  - `{region}_transformers.csv`: Transformer locations and loads
+  - `{region}_secondary_edges.csv`: Secondary network connections
+  - `{region}_road_transformer_edges.txt`: Road-transformer sequences
 
 - **Primary Network**:
   - `{substation_id}_nodes.csv`: Primary network nodes
