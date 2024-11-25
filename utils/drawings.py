@@ -232,3 +232,89 @@ def plot_combined_road_transformer(combined_network, ax, **kwargs):
     ax.tick_params(left=False, bottom=False, 
                     labelleft=False, labelbottom=False)
     return
+
+def plot_distribution_network(combined_network, ax, **kwargs):
+     # ------ parameters for plot ------
+     subnodecolor = kwargs.get("substationcolor", 'royalblue')
+     subnodesize = kwargs.get("substationsize", 100)
+     roadnodecolor = kwargs.get("roadnodecolor", 'black')
+     roadnodesize = kwargs.get("roadnodesize", 5)
+     tsfrnodecolor = kwargs.get("transformercolor", 'seagreen')
+     tsfrnodesize = kwargs.get("transformersize", 50)
+     homenodecolor = kwargs.get("homecolor", 'crimson')
+     homenodesize = kwargs.get("homesize", 20)
+     feededgecolor = kwargs.get("feederedgecolor", 'royalblue')
+     feededgewidth = kwargs.get("feedredgewidth", 0.8)
+     primedgecolor = kwargs.get("primedgecolor", 'black')
+     primedgewidth = kwargs.get("primedgewidth", 0.8)
+     secedgecolor = kwargs.get("primedgecolor", 'crimson')
+     secedgewidth = kwargs.get("primedgewidth", 0.5)
+     alpha = kwargs.get("alpha", 1.0)
+     style = kwargs.get("linestyle", 'dashed')
+     
+     # ------ plot the substation nodes -----------
+     d = {'nodes':[n for n in combined_network.nodes if combined_network.nodes[n]['label']=='S'],
+          'geometry':[Point(combined_network.nodes[n]["cord"][0],
+                              combined_network.nodes[n]["cord"][1]) \
+                         for n in combined_network.nodes if combined_network.nodes[n]['label']=='S']}
+     df_nodes = gpd.GeoDataFrame(d, crs="EPSG:4326")
+     df_nodes.plot(ax = ax, color = subnodecolor, markersize = subnodesize, 
+                    alpha = alpha, label = "substations")
+
+     # ------ plot the road nodes -----------
+     d = {'nodes':[n for n in combined_network.nodes if combined_network.nodes[n]['label']=='R'],
+          'geometry':[Point(combined_network.nodes[n]["cord"][0],
+                              combined_network.nodes[n]["cord"][1]) \
+                         for n in combined_network.nodes if combined_network.nodes[n]['label']=='R']}
+     df_nodes = gpd.GeoDataFrame(d, crs="EPSG:4326")
+     df_nodes.plot(ax = ax, color = roadnodecolor, markersize = roadnodesize, 
+                    alpha = alpha, label = "road nodes")
+
+     # ------ plot the transformer nodes -----------
+     d = {'nodes':[n for n in combined_network.nodes if combined_network.nodes[n]['label']=='T'],
+          'geometry':[Point(combined_network.nodes[n]["cord"][0],
+                              combined_network.nodes[n]["cord"][1]) \
+                         for n in combined_network.nodes if combined_network.nodes[n]['label']=='T']}
+     df_nodes = gpd.GeoDataFrame(d, crs="EPSG:4326")
+     df_nodes.plot(ax = ax, color = tsfrnodecolor, markersize = tsfrnodesize, 
+                    alpha = alpha, label = "transformers")
+
+     # ------ plot the home nodes -----------
+     d = {'nodes':[n for n in combined_network.nodes if combined_network.nodes[n]['label']=='H'],
+          'geometry':[Point(combined_network.nodes[n]["cord"][0],
+                              combined_network.nodes[n]["cord"][1]) \
+                         for n in combined_network.nodes if combined_network.nodes[n]['label']=='H']}
+     df_nodes = gpd.GeoDataFrame(d, crs="EPSG:4326")
+     df_nodes.plot(ax = ax, color = homenodecolor, markersize = homenodesize, 
+                    alpha = alpha, label = "residences")
+
+     # ------ plot the feeder edges -----------
+     d = {'edges':[e for e in combined_network.edges if combined_network.edges[e]['label']=='feeder'],
+          'geometry':[combined_network.edges[e]['geometry'] \
+               for e in combined_network.edges if combined_network.edges[e]['label']=='feeder']}
+     df_edges = gpd.GeoDataFrame(d, crs="EPSG:4326")
+     df_edges.plot(ax = ax, edgecolor = feededgecolor, linewidth = feededgewidth,
+                    linestyle = style, alpha = alpha, label = "feeder lines")
+
+     # ------ plot the primary network edges -----------
+     d = {'edges':[e for e in combined_network.edges if combined_network.edges[e]['label']=='primary'],
+          'geometry':[combined_network.edges[e]['geometry'] \
+               for e in combined_network.edges if combined_network.edges[e]['label']=='primary']}
+     df_edges = gpd.GeoDataFrame(d, crs="EPSG:4326")
+     df_edges.plot(ax = ax, edgecolor = primedgecolor, linewidth = primedgewidth,
+                    linestyle = style, alpha = alpha, label = "primary network")
+
+     # ------ plot the secondary network edges -----------
+     d = {'edges':[e for e in combined_network.edges if combined_network.edges[e]['label']=='secondary'],
+          'geometry':[combined_network.edges[e]['geometry'] \
+               for e in combined_network.edges if combined_network.edges[e]['label']=='secondary']}
+     df_edges = gpd.GeoDataFrame(d, crs="EPSG:4326")
+     df_edges.plot(ax = ax, edgecolor = secedgecolor, linewidth = secedgewidth,
+                    linestyle = style, alpha = alpha, label = "secondary network")
+
+     # ----- Legend handler ------
+     fontsize = kwargs.get('fontsize', 30)
+     ax.legend(loc='upper left', markerscale=1.5, fontsize=fontsize)
+     ax.tick_params(left=False, bottom=False, 
+                    labelleft=False, labelbottom=False)
+     return

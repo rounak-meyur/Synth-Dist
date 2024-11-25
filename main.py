@@ -32,22 +32,25 @@ def main():
     from utils.dataloader import load_homes, load_substations
     from utils.osm_utils import load_roads, save_road_network, load_road_network_from_files
 
+    region = conf["region"]
     input_home_csv = conf["inputs"]["home_csv"]
     input_sub_csv = conf["inputs"]["substation_csv"]
     homes = load_homes(file_path=input_home_csv)
     subs = load_substations(file_path=input_sub_csv, homes=homes)
-    if not os.path.exists(conf["intermediate"]["road_edges"]) or not os.path.exists(conf["intermediate"]["road_nodes"]):
+    road_edge_file = f"{conf['miscellaneous']['intermediate_dir']}{region}_road_edges.csv"
+    road_node_file = f"{conf['miscellaneous']['intermediate_dir']}{region}_road_nodes.csv"
+    if not os.path.exists(road_edge_file) or not os.path.exists(road_node_file):
         roads = load_roads(homes)
         save_road_network(
             roads, 
-            edgelist_file=conf["intermediate"]["road_edges"],
-            nodelist_file=conf["intermediate"]["road_nodes"]
+            edgelist_file=road_edge_file,
+            nodelist_file=road_node_file
             )
     else:
-        logger.info(f"Road network has been loaded earlier. Loading from edgelist {conf['intermediate']['road_edges']}")
+        logger.info(f"Road network has been loaded earlier. Loading from edgelist {road_edge_file}")
         roads = load_road_network_from_files(
-            edgelist_file=conf["intermediate"]["road_edges"],
-            nodelist_file=conf["intermediate"]["road_nodes"]
+            edgelist_file=road_edge_file,
+            nodelist_file=road_node_file
             )
     logger.info(f"Residence and road data loading complete in {time.time()-ts} seconds.")
 
@@ -60,11 +63,11 @@ def main():
         compute_edge_to_homes_map
     )
 
-    h2r_map_file = conf["mapping"]["home_to_road"]
+    h2r_map_file = f"{conf['miscellaneous']['mapping_dir']}{region}_map_h2r.txt"
     if not os.path.exists(h2r_map_file):
         h2r = map_homes_to_edges(
             roads, homes, 
-            padding_distance=conf["mapping"]["padding"])
+            padding_distance=conf["miscellaneous"]["padding"])
         write_mapping_to_file(h2r, h2r_map_file)
     else:
         h2r = read_mapping_from_file(homes, filename=h2r_map_file)
@@ -74,8 +77,8 @@ def main():
 
     # Generate secondary network and combine road network with transformers
     ts = time.time()
-    combined_edges = f"{conf['secnet']['out_dir']}{conf['secnet']['out_prefix']}_combined_network_edges.csv"
-    combined_nodes = f"{conf['secnet']['out_dir']}{conf['secnet']['out_prefix']}_combined_network_nodes.csv"
+    combined_edges = f"{conf['secnet']['out_dir']}{region}_combined_network_edges.csv"
+    combined_nodes = f"{conf['secnet']['out_dir']}{region}_combined_network_nodes.csv"
     if not os.path.exists(combined_edges) or not os.path.exists(combined_nodes):
         from utils.secnet_utils import SecondaryNetworkGenerator
         generator = SecondaryNetworkGenerator(
@@ -94,10 +97,10 @@ def main():
                 mapped_homes=r2h[road_link],
                 **secnet_args
             )
-            generator.save_results(prefix=conf["secnet"]["out_prefix"], road_link_id=road_link)
+            generator.save_results(prefix=region, road_link_id=road_link)
 
         # Combine road network with transformers
-        combined_network = generator.combine_networks(road_network=roads, prefix=conf["secnet"]["out_prefix"])
+        combined_network = generator.combine_networks(road_network=roads, prefix=conf["region"])
     else:
         from utils.secnet_utils import load_combined_network
         combined_network = load_combined_network(
@@ -145,12 +148,14 @@ def main():
     from utils.primnet_utils import PrimaryNetworkGenerator
     primnet_config = conf["primnet"]["primnet_args"]
     
+    service_substations = []
     for sub in subs:
         if int(sub.id) not in partition_data:
             logger.info(f"No nodes mapped to the substation {sub.id}")
         else:
-            primnet_edge_csv = f"{conf['primnet']['out_dir']}test_{sub.id}_edges.csv"
-            primnet_node_csv = f"{conf['primnet']['out_dir']}test_{sub.id}_nodes.csv"
+            service_substations.append(sub.id)
+            primnet_edge_csv = f"{conf['primnet']['out_dir']}{sub.id}_edges.csv"
+            primnet_node_csv = f"{conf['primnet']['out_dir']}{sub.id}_nodes.csv"
             if not os.path.exists(primnet_edge_csv) or not os.path.exists(primnet_node_csv):
                 generator = PrimaryNetworkGenerator(output_dir=conf["primnet"]["out_dir"])
                 generator.generate_network_for_substation(
@@ -161,6 +166,23 @@ def main():
                 generator.export_to_csv(prefix=f"test_{str(sub.id)}")
             else:
                 logger.info(f"Primary network already generated and saved for substation {sub.id}")
+    
+    # Create the network by combining primary nd secondary network
+    from utils.finalnet_utils import combine_networks
+    from utils.drawings import plot_distribution_network
+    distribution_network = combine_networks(
+        service_substations, 
+        region_name=conf["region"], 
+        homes=homes,
+        prim_dir=conf["primnet"]["out_dir"],
+        sec_dir=conf["secnet"]["out_dir"]
+    )
+    if args.generate_plot:
+        fig, ax = plt.subplots(1, 1, figsize=(30,18))
+        plot_distribution_network(distribution_network, ax=ax)
+        fig.suptitle(f"Synthetic distribution network for region: {region}", fontsize=55)
+        fig.savefig(f"figs/{region}_distribution_network.png", bbox_inches='tight')
+    
     
 if __name__ == "__main__":
     main()

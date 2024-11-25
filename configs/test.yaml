@@ -1,3 +1,5 @@
+region: test
+
 inputs:
   home_csv: "data/load/test-home-load.csv"
   substation_csv: "data/substations.csv"
@@ -5,19 +7,14 @@ inputs:
 logging:
   log_file: "logs/application_test.log"
 
-intermediate:
-  road_edges: "out/interim/test_road_edges.csv"
-  road_nodes: "out/interim/test_road_nodes.csv"
-
-mapping:
+miscellaneous:
+  intermediate_dir: "out/interim/"
+  mapping_dir: "out/mapping/"
   padding: 0.001
-  home_to_road: "out/mapping/test_map_h2r.txt"
-  road_to_home: "out/mapping/test_map_r2h.txt"
 
 secnet:
   out_dir: "out/secnet/"
   base_transformer_id: 51121000000000000
-  out_prefix: "test"
   secnet_args:
     separation: 50.0
     penalty: 0.5
