@@ -34,3 +34,10 @@ primnet:
     verbose: true
     warm_start: true
     threads: 0
+
+figures:
+  directory: "figs"
+  combined_network: 
+    filename: "combined_network.png"
+  final_network:
+    filename: "distribution_network.png"

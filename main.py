@@ -5,6 +5,7 @@ def main():
     import time
     import argparse
     from omegaconf import OmegaConf
+    from pathlib import Path
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-c", "--configPath",
@@ -109,6 +110,9 @@ def main():
     logger.info(f"Secondary network generation/loading complete in {time.time()-ts} seconds.")
     
     if args.generate_plot:
+        figdir = conf["figures"]["directory"]
+        Path(figdir).mkdir(parents=True, exist_ok=True)
+        combined_network_filename = conf["figures"]["combined_network"]["filename"]
         import matplotlib.pyplot as plt
         from utils.drawings import plot_combined_road_transformer, plot_substations, plot_homes
         fig, ax = plt.subplots(1, 1, figsize=(30,18))
@@ -116,7 +120,7 @@ def main():
         plot_homes(homes, ax=ax)
         plot_combined_road_transformer(combined_network, ax=ax)
         fig.suptitle("Road network with transformers and substations", fontsize=55)
-        fig.savefig("figs/test_combined_network.png", bbox_inches='tight')
+        fig.savefig(f"{figdir}/{region}_{combined_network_filename}", bbox_inches='tight')
 
     # Partition transformer nodes to the nearest reachable substation
     ts = time.time()
@@ -156,6 +160,7 @@ def main():
             primnet_edge_csv = f"{conf['primnet']['out_dir']}{region}_{sub.id}_edges.csv"
             primnet_node_csv = f"{conf['primnet']['out_dir']}{region}_{sub.id}_nodes.csv"
             if not os.path.exists(primnet_edge_csv) or not os.path.exists(primnet_node_csv):
+                logger.info(f"Creating primary network for service substation {sub.id}")
                 generator = PrimaryNetworkGenerator(output_dir=conf["primnet"]["out_dir"])
                 generator.generate_network_for_substation(
                     sub, 
@@ -177,10 +182,13 @@ def main():
         sec_dir=conf["secnet"]["out_dir"]
     )
     if args.generate_plot:
+        figdir = conf["figures"]["directory"]
+        final_network_filename = conf["figures"]["final_network"]["filename"]
+        Path(figdir).mkdir(parents=True, exist_ok=True)
         fig, ax = plt.subplots(1, 1, figsize=(30,18))
         plot_distribution_network(distribution_network, ax=ax)
         fig.suptitle(f"Synthetic distribution network for region: {region}", fontsize=55)
-        fig.savefig(f"figs/{region}_distribution_network.png", bbox_inches='tight')
+        fig.savefig(f"figs/{region}_{final_network_filename}", bbox_inches='tight')
     
     
 if __name__ == "__main__":
