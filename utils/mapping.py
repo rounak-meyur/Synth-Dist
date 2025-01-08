@@ -203,7 +203,8 @@ def compute_edge_to_homes_map(home_to_edge_map: List[Tuple[Home, Tuple]]) -> Dic
     edge_to_homes_map = defaultdict(list)
 
     for home, edge in home_to_edge_map:
-        edge_to_homes_map[edge].append(home)
+        if edge is not None:
+            edge_to_homes_map[edge].append(home)
 
     logger.info(f"Computed reverse map for {len(edge_to_homes_map)} edges")
 
