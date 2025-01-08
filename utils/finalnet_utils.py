@@ -88,8 +88,8 @@ def combine_networks(
     
     # First, load and combine primary networks for each substation
     for sub_id in sub_ids:
-        node_file = Path(prim_dir) / f"{sub_id}_nodes.csv"
-        edge_file = Path(prim_dir) / f"{sub_id}_edges.csv"
+        node_file = Path(prim_dir) / f"{region_name}_{sub_id}_nodes.csv"
+        edge_file = Path(prim_dir) / f"{region_name}_{sub_id}_edges.csv"
         
         if not node_file.exists() or not edge_file.exists():
             logger.warning(f"Files not found for substation {sub_id}")
