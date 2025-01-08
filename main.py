@@ -46,12 +46,11 @@ def main():
             edgelist_file=road_edge_file,
             nodelist_file=road_node_file
             )
-    else:
-        logger.info(f"Road network has been loaded earlier. Loading from edgelist {road_edge_file}")
-        roads = load_road_network_from_files(
-            edgelist_file=road_edge_file,
-            nodelist_file=road_node_file
-            )
+    # load the road from the file to load as an undirected graph
+    roads = load_road_network_from_files(
+        edgelist_file=road_edge_file,
+        nodelist_file=road_node_file
+        )
     logger.info(f"Residence and road data loading complete in {time.time()-ts} seconds.")
 
     # Map roads and homes
@@ -139,9 +138,9 @@ def main():
                 )
         except ValueError as e:
             logger.error(f"Error occurred while partitioning: {e}")
-    else:
-        from utils.partition_utils import load_partitioning
-        partition_data = load_partitioning(assignment_json)
+    
+    from utils.partition_utils import load_partitioning
+    partition_data = load_partitioning(assignment_json)
     logger.info(f"Transformer partitioning and partition data loading complete in {time.time()-ts} seconds.")
     
     # Create primary network sequentially for all substation partitioned data
@@ -154,8 +153,8 @@ def main():
             logger.info(f"No nodes mapped to the substation {sub.id}")
         else:
             service_substations.append(sub.id)
-            primnet_edge_csv = f"{conf['primnet']['out_dir']}{sub.id}_edges.csv"
-            primnet_node_csv = f"{conf['primnet']['out_dir']}{sub.id}_nodes.csv"
+            primnet_edge_csv = f"{conf['primnet']['out_dir']}{region}_{sub.id}_edges.csv"
+            primnet_node_csv = f"{conf['primnet']['out_dir']}{region}_{sub.id}_nodes.csv"
             if not os.path.exists(primnet_edge_csv) or not os.path.exists(primnet_node_csv):
                 generator = PrimaryNetworkGenerator(output_dir=conf["primnet"]["out_dir"])
                 generator.generate_network_for_substation(
