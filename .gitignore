@@ -5,9 +5,16 @@ gurobi
 tests/__pycache__
 logs
 results
+work
 
 # Generated Files
 *.png
 *.csv
 *.txt
 *.json
+*.nextflow*
+*.log
+
+
+# Specific scripts
+clean.sh
