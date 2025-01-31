@@ -80,7 +80,7 @@ def main():
     
     
     from utils.secnet_utils import SecondaryNetworkGenerator
-    base_tsfr_id = int(f"{state}{region}{conf["secnet"]["base_transformer_id"]}")
+    base_tsfr_id = int(f"{state}{region}{conf['secnet']['base_transformer_id']}")
     generator = SecondaryNetworkGenerator(
         output_dir=conf["secnet"]["out_dir"],
         base_transformer_id=base_tsfr_id,

@@ -25,6 +25,7 @@ def main():
     args = parser.parse_args()
     configpath = args.configPath
     conf = OmegaConf.load(configpath)
+    state = conf["state"]
     region = args.region
 
     from utils.logging_utils import LogManager
@@ -86,9 +87,10 @@ def main():
     combined_nodes = f"{conf['secnet']['out_dir']}{region}_combined_network_nodes.csv"
     if not os.path.exists(combined_edges) or not os.path.exists(combined_nodes):
         from utils.secnet_utils import SecondaryNetworkGenerator
+        base_tsfr_id = int(f"{state}{region}{conf['secnet']['base_transformer_id']}")
         generator = SecondaryNetworkGenerator(
             output_dir=conf["secnet"]["out_dir"],
-            base_transformer_id=conf["secnet"]["base_transformer_id"],
+            base_transformer_id=base_tsfr_id,
         )
         secnet_args = conf["secnet"]["secnet_args"]
         for road_link in r2h:
