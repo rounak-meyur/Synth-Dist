@@ -153,7 +153,7 @@ class NetworkPartitioner:
         candidate_nodes = self.spatial_index.intersect(search_bbox)
         if not candidate_nodes:
             err_msg = f"No nodes found within radius {search_radius}"
-            logger.error(err_msg)
+            logger.warning(err_msg)
             raise ValueError(err_msg)
         
         return candidate_nodes
@@ -215,6 +215,7 @@ class NetworkPartitioner:
         """
         # Extract center nodes for Voronoi partitioning
         centers = list(substation_nodes.values())
+        logger.info(f"Number of nodes: {len(self.network.nodes)}")
         
         # First Voronoi partitioning
         cells = nx.voronoi_cells(self.network, centers, 'length')
@@ -236,6 +237,7 @@ class NetworkPartitioner:
         }
         
         # Assign transformers based on cell membership
+        assignment_count = 0
         for center_node in valid_centers:
             # Find corresponding substation ID
             sub_id = next(
@@ -244,7 +246,9 @@ class NetworkPartitioner:
             )
             
             assignments[sub_id] = list(cells[center_node])
+            assignment_count += len(assignments[sub_id])
         
+        logger.info(f"Number of assignments: {assignment_count}")
         return assignments
     
     def save_partitioning(

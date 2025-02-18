@@ -134,6 +134,7 @@ def main():
     ts = time.time()
     assignment_json = f"{conf['miscellaneous']['intermediate_dir']}{region}_transformer_assignment.json"
     if not os.path.exists(assignment_json):
+        logger.info("Assigning transformers to nearest substation")
         from utils.partition_utils import NetworkPartitioner
         partitioner = NetworkPartitioner(combined_network)
         try:
@@ -175,7 +176,7 @@ def main():
                     assignment = partition_data[int(sub.id)],
                     config=primnet_config
                     )
-                generator.export_to_csv(prefix=f"test_{str(sub.id)}")
+                generator.export_to_csv(prefix=f"{region}_{str(sub.id)}")
             else:
                 logger.info(f"Primary network already generated and saved for substation {sub.id}")
     

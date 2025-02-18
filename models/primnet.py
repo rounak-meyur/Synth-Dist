@@ -175,7 +175,7 @@ def optimize_primary_network(
     # Add feeder connections from substation to feeder nodes
     feeder_nodes = []
     for i, n in enumerate(rnodes):
-        if z.value[i] < 0.2:
+        if z.value[i] < 0.5:
             if n not in result.nodes():
                 logger.error(f"Feeder node {n} is not present in the result network.")
                 raise ValueError("Identified feeder node is not in output network.")

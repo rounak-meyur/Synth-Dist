@@ -13,7 +13,7 @@ miscellaneous:
 
 secnet:
   out_dir: "out/secnet/"
-  base_transformer_id: 000000000000
+  base_transformer_id: "000000000000"
   secnet_args:
     separation: 50.0
     penalty: 0.5
