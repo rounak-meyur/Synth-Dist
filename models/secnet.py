@@ -197,8 +197,13 @@ def create_secondary_distribution_network(
     # Step 5: Solve the optimization problem
     problem = cp.Problem(objective, constraints)
     logger.info("Starting optimization")
-    problem.solve(solver=cp.SCIP, verbose=False)
-    logger.info(f"Optimization completed. Status: {problem.status}, Optimal value: {problem.value}")
+
+    try:
+        problem.solve(solver=cp.SCIP, verbose=False)
+        logger.info(f"Optimization completed. Status: {problem.status}, Optimal value: {problem.value}")
+    except Exception as e:
+        logger.error(f"Optimization failed while solving optimization problem: {str(e)}")
+        return nx.Graph()
     
     # Step 6: Construct the result graph
     result = nx.Graph()
