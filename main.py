@@ -27,6 +27,7 @@ def main():
     conf = OmegaConf.load(configpath)
     state = conf["state"]
     region = args.region
+    conf["region"] = region
 
     from utils.logging_utils import LogManager
     LogManager.initialize(
