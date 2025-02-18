@@ -82,12 +82,12 @@ conda activate synth
 
 2. Run the main script:
 ```bash
-python main.py -c configs/your_config.yaml
+python main.py -c configs/config.yaml -r region_ID
 ```
 
 To generate visualization plots, add the `-p` flag:
 ```bash
-python main.py -c configs/your_config.yaml -p
+python main.py -c configs/config.yaml -r region_ID -p
 ```
 
 ## 📊 Configuration file
@@ -95,7 +95,7 @@ python main.py -c configs/your_config.yaml -p
 The program uses YAML configuration files with the following key sections:
 
 ```yaml
-region: test
+state: 51
 
 inputs:
   home_csv_dir: "data/load/"
@@ -109,7 +109,7 @@ miscellaneous:
 
 secnet:
   out_dir: "out/secnet/"
-  base_transformer_id: 51121000000000000
+  base_transformer_id: 000000000000
   secnet_args:
     separation: 50.0
     penalty: 0.5

@@ -1,0 +1,44 @@
+state: 51
+region: 999
+
+inputs:
+  home_csv_dir: "data/load/"
+  substation_csv: "data/substations.csv"
+
+miscellaneous:
+  log_dir: "logs/"
+  intermediate_dir: "out/interim/"
+  mapping_dir: "out/mapping/"
+  padding: 0.001
+
+secnet:
+  out_dir: "out/secnet/"
+  base_transformer_id: 000000000000
+  secnet_args:
+    separation: 50.0
+    penalty: 0.5
+    max_rating: 25000
+    max_hops: 10
+
+primnet:
+  out_dir: "out/primnet/"
+  primnet_args:
+    voltage_max: 1.05
+    voltage_min: 0.90
+    maximum_voltage_drop: 0.15
+    conductor_resistance_per_km: 0.8625
+    base_impedance: 39690
+    maximum_branch_flow: 400
+    max_feeder_number: 10
+    max_feeder_capacity: 400
+    relative_gap: 0.05
+    verbose: true
+    warm_start: true
+    threads: 0
+
+figures:
+  directory: "figs"
+  combined_network: 
+    filename: "combined_network.png"
+  final_network:
+    filename: "distribution_network.png"

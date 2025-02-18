@@ -10,7 +10,12 @@ def main():
     parser.add_argument(
         "-c", "--configPath",
         help = "path to configuration file",
-        default = "configs/test.yaml"
+        default = "configs/config.yaml"
+    )
+    parser.add_argument(
+        "-r", "--region",
+        help = "county ID for the region",
+        default = 999
     )
     parser.add_argument(
         "-p", "--generate_plot",
@@ -20,7 +25,9 @@ def main():
     args = parser.parse_args()
     configpath = args.configPath
     conf = OmegaConf.load(configpath)
-    region = conf["region"]
+    state = conf["state"]
+    region = args.region
+    conf["region"] = region
 
     from utils.logging_utils import LogManager
     LogManager.initialize(
@@ -81,9 +88,10 @@ def main():
     combined_nodes = f"{conf['secnet']['out_dir']}{region}_combined_network_nodes.csv"
     if not os.path.exists(combined_edges) or not os.path.exists(combined_nodes):
         from utils.secnet_utils import SecondaryNetworkGenerator
+        base_tsfr_id = int(f"{state}{region}{conf['secnet']['base_transformer_id']}")
         generator = SecondaryNetworkGenerator(
             output_dir=conf["secnet"]["out_dir"],
-            base_transformer_id=conf["secnet"]["base_transformer_id"],
+            base_transformer_id=base_tsfr_id,
         )
         secnet_args = conf["secnet"]["secnet_args"]
         for road_link in r2h:
@@ -100,7 +108,7 @@ def main():
             generator.save_results(prefix=region, road_link_id=road_link)
 
         # Combine road network with transformers
-        combined_network = generator.combine_networks(road_network=roads, prefix=conf["region"])
+        combined_network = generator.combine_networks(road_network=roads, prefix=region)
     else:
         from utils.secnet_utils import load_combined_network
         combined_network = load_combined_network(
@@ -176,7 +184,7 @@ def main():
     from utils.drawings import plot_distribution_network
     distribution_network = combine_networks(
         service_substations, 
-        region_name=conf["region"], 
+        region_name=region, 
         homes=homes,
         prim_dir=conf["primnet"]["out_dir"],
         sec_dir=conf["secnet"]["out_dir"]
