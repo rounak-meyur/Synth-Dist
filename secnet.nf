@@ -22,7 +22,7 @@ process secnet {
     publishDir "$params.outdir", 
         mode: 'copy',
         saveAs: { filename ->
-            filename.replace('out', "out_${x}")
+            filename.replace('out', "${x}_out")
         }
 
     input:

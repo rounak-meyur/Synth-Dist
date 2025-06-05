@@ -25,7 +25,7 @@ def main():
     from utils.logging_utils import LogManager
     LogManager.initialize(
         log_file_path=f"{conf['miscellaneous']['log_dir']}secnet_{region}.log", 
-        log_config_path="configs/logging_config.ini"
+        log_config_path="utils/logging_config.ini"
     )
     logger = LogManager.get_logger("__main__")
 
@@ -34,7 +34,7 @@ def main():
     from utils.dataloader import load_homes, load_substations
     from utils.osm_utils import load_roads, save_road_network, load_road_network_from_files
 
-    input_home_csv = f"{conf['inputs']['home_csv_dir']}{region}-home-load.csv"
+    input_home_csv = f"{region}-home-load.csv"
     homes = load_homes(file_path=input_home_csv)
     road_edge_file = f"{conf['miscellaneous']['intermediate_dir']}{region}_road_edges.csv"
     road_node_file = f"{conf['miscellaneous']['intermediate_dir']}{region}_road_nodes.csv"

@@ -32,7 +32,7 @@ def main():
     from utils.logging_utils import LogManager
     LogManager.initialize(
         log_file_path=f"{conf['miscellaneous']['log_dir']}application_{region}.log", 
-        log_config_path="configs/logging_config.ini"
+        log_config_path="utils/logging_config.ini"
     )
     logger = LogManager.get_logger("__main__")
 
@@ -175,7 +175,7 @@ def main():
                     assignment = partition_data[int(sub.id)],
                     config=primnet_config
                     )
-                generator.export_to_csv(prefix=f"test_{str(sub.id)}")
+                generator.export_to_csv(prefix=f"{region}_{str(sub.id)}")
             else:
                 logger.info(f"Primary network already generated and saved for substation {sub.id}")
     
