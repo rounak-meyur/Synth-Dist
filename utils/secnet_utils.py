@@ -92,12 +92,41 @@ class SecondaryNetworkGenerator:
                 # Recursively get children of this neighbor
                 children.update(self._get_tree_children(network, neighbor, root))
         return children
+    
+    def _suggest_transformer_capacity(self, peak_load_watts: float) -> float:
+        """
+        Suggest appropriate transformer capacity based on peak load
+        
+        Args:
+            peak_load_watts: Peak load in watts
+            
+        Returns:
+            Suggested capacity in kVA
+        """
+        # Constants
+        POWER_FACTOR = 0.9  # Standard power factor for residential load
+        SAFETY_MARGIN = 1.3  # 30% safety margin for transformer sizing
+        STANDARD_SIZES = [10, 15, 25, 37.5, 50, 75, 100, 167, 250, 333, 500, 750, 1000, 1500, 2000, 2500]  # kVA
+
+        # Convert peak load from watts to kVA
+        peak_kva = peak_load_watts / 1000 / POWER_FACTOR
+        
+        # Add safety margin
+        required_kva = peak_kva * SAFETY_MARGIN
+        
+        # Round up to nearest standard size
+        for size in STANDARD_SIZES:
+            if size >= required_kva:
+                return size
+        
+        # If larger than standard sizes, round up to nearest 500 kVA
+        return 500 * (int(required_kva / 500) + 1)
 
     def _calculate_transformer_load(
         self,
         network: nx.Graph,
         transformer_node: str
-    ) -> float:
+    ) -> List[float]:
         """
         Calculate total load for a transformer by traversing its tree.
         
@@ -106,17 +135,22 @@ class SecondaryNetworkGenerator:
             transformer_node (str): Root transformer node
             
         Returns:
-            float: Total load of all home nodes in the transformer's tree
+            List[float]: Total load profile required to be served by the transformer
         """
         # Get all nodes in this transformer's tree
         tree_nodes = self._get_tree_children(network, transformer_node)
         
-        # Sum loads of all home nodes in the tree
-        total_load = sum(
-            network.nodes[node]['load']
-            for node in tree_nodes
-            if network.nodes[node]['label'] == 'H'
-        )
+        # # Sum loads of all home nodes in the tree
+        # total_load = sum(
+        #     network.nodes[node]['load']
+        #     for node in tree_nodes
+        #     if network.nodes[node]['label'] == 'H'
+        # )
+
+        # Get net 24 hour load profile for all homes in the tree
+        total_load = [sum([network.nodes[node]['profile'][i] \
+                           for node in tree_nodes if network.nodes[node]['label'] == 'H']) \
+                            for i in range(24)]
         
         return total_load
     
@@ -153,7 +187,7 @@ class SecondaryNetworkGenerator:
 
         # Generate candidate network
         graph, road_nodes = create_candidate_network(
-            road_link, road_geom,mapped_homes,
+            road_link, road_geom, mapped_homes,
             nearest_homes=nearest_homes,
             minimum_separation=minimum_separation,
             )
@@ -196,14 +230,17 @@ class SecondaryNetworkGenerator:
             transformer_id = self._generate_transformer_id()
             transformer_id_mapping[t_node] = transformer_id
             
-            # Calculate total load for this transformer's tree
+            # Calculate total load profile for this transformer's tree
             total_load = self._calculate_transformer_load(network, t_node)
+
+            # Suggested transformer capacity in kVA
+            suggested_capacity = self._suggest_transformer_capacity(max(total_load))
             
             # Create and store transformer
             transformer = Transformer(
                 id=transformer_id,
                 cord=network.nodes[t_node]['cord'],
-                load=total_load
+                load=suggested_capacity*1e3
             )
             self.all_transformers[transformer_id] = transformer
         
