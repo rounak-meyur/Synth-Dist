@@ -66,9 +66,9 @@ def create_candidate_network(
     # Add nodes to the graph
     for point, side in labeled_points:
         if isinstance(point, Home):
-            G.add_node(point.id, cord=point.cord, load=point.load, label='H', side=side)
+            G.add_node(point.id, cord=point.cord, load=point.load, label='H', side=side, profile=point.profile)
         else:
-            G.add_node(f"T{probable_transformers.index(point)}", cord=point, load=0.0, label='T', side=side)
+            G.add_node(f"T{probable_transformers.index(point)}", cord=point, load=0.0, label='T', side=side, profile=[0.0]*24)
 
     # 3. Add edges between homes
     if len(mapped_homes) > 10:
