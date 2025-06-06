@@ -106,7 +106,7 @@ class SecondaryNetworkGenerator:
         # Constants
         POWER_FACTOR = 0.9  # Standard power factor for residential load
         SAFETY_MARGIN = 1.3  # 30% safety margin for transformer sizing
-        STANDARD_SIZES = [10, 15, 25, 37.5, 50, 75, 100, 167, 250, 333, 500, 750, 1000, 1500, 2000, 2500]  # kVA
+        STANDARD_SIZES = [3, 5, 7.5, 10, 15, 25, 37.5, 50, 75, 100, 167, 250, 333, 500, 750, 1000, 1500, 2000, 2500]  # kVA
 
         # Convert peak load from watts to kVA
         peak_kva = peak_load_watts / 1000 / POWER_FACTOR

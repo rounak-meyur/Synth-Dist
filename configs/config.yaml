@@ -7,13 +7,12 @@ inputs:
 
 miscellaneous:
   log_dir: "logs/"
-  intermediate_dir: "out/interim/"
-  mapping_dir: "out/mapping/"
+  intermediate_dir: "interim/"
+  mapping_dir: "mapping/"
   padding: 0.001
 
 secnet:
-  out_dir: "out/secnet/"
-  base_transformer_id: 000000000000
+  out_dir: "secnet/"
   secnet_args:
     separation: 50.0
     penalty: 0.5
@@ -21,7 +20,7 @@ secnet:
     max_hops: 10
 
 primnet:
-  out_dir: "out/primnet/"
+  out_dir: "primnet/"
   primnet_args:
     voltage_max: 1.05
     voltage_min: 0.90

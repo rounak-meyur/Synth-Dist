@@ -36,8 +36,8 @@ def main():
 
     input_home_csv = f"{region}-home-load.csv"
     homes = load_homes(file_path=input_home_csv)
-    road_edge_file = f"{conf['miscellaneous']['intermediate_dir']}{region}_road_edges.csv"
-    road_node_file = f"{conf['miscellaneous']['intermediate_dir']}{region}_road_nodes.csv"
+    road_edge_file = f"out_{region}/{conf['miscellaneous']['intermediate_dir']}{region}_road_edges.csv"
+    road_node_file = f"out_{region}/{conf['miscellaneous']['intermediate_dir']}{region}_road_nodes.csv"
     if not os.path.exists(road_edge_file) or not os.path.exists(road_node_file):
         roads = load_roads(homes)
         save_road_network(
@@ -61,7 +61,7 @@ def main():
         compute_edge_to_homes_map
     )
 
-    h2r_map_file = f"{conf['miscellaneous']['mapping_dir']}{region}_map_h2r.txt"
+    h2r_map_file = f"out_{region}/{conf['miscellaneous']['mapping_dir']}{region}_map_h2r.txt"
     if not os.path.exists(h2r_map_file):
         h2r = map_homes_to_edges(
             roads, homes, 
@@ -75,14 +75,14 @@ def main():
 
     # Generate secondary network and combine road network with transformers
     ts = time.time()
-    combined_edges = f"{conf['secnet']['out_dir']}{region}_combined_network_edges.csv"
-    combined_nodes = f"{conf['secnet']['out_dir']}{region}_combined_network_nodes.csv"
+    combined_edges = f"out_{region}/{conf['secnet']['out_dir']}{region}_combined_network_edges.csv"
+    combined_nodes = f"out_{region}/{conf['secnet']['out_dir']}{region}_combined_network_nodes.csv"
     
     
     from utils.secnet_utils import SecondaryNetworkGenerator
-    base_tsfr_id = int(f"{state}{region}{conf['secnet']['base_transformer_id']}")
+    base_tsfr_id = int(f"{state}{region}{0:012d}")
     generator = SecondaryNetworkGenerator(
-        output_dir=conf["secnet"]["out_dir"],
+        output_dir=f"out_{region}/{conf["secnet"]["out_dir"]}",
         base_transformer_id=base_tsfr_id,
     )
     secnet_args = conf["secnet"]["secnet_args"]

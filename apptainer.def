@@ -1,0 +1,24 @@
+Bootstrap: docker
+From: python:3.12.6-slim-bullseye
+
+%files
+    requirements.txt /
+
+%post
+    apt-get update && apt-get install -y git ssh
+    pip install -r /requirements.txt
+    
+    # Clean up to reduce image size
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+%environment
+    export LC_ALL=C
+
+%runscript
+    exec "$@"
+
+%labels
+    Author Rounak Meyur
+    Version 1.0
+    Description Python 3.12.6 environment with git, ssh, and custom requirements
