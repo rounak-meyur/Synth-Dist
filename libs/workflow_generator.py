@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
-from workflow_stage import WorkflowStage
+from libs.workflow_stage import WorkflowStage
 
 class WorkflowGenerator:
     """
@@ -455,6 +455,11 @@ workflow {
         
         # Generate output format
         output_formats_str = self.generate_output_format(stage.outputs)
+
+        # Add errorStrategy directive if specified
+        errorStrategy_directive = ""
+        if stage.script.get('errorStrategy'):
+            errorStrategy_directive = f"    errorStrategy '{stage.script['errorStrategy']}'\n"
         
         # Add container directive if specified
         container_directive = ""
@@ -473,7 +478,7 @@ workflow {
         return f"""
 // Modified process definition for stage: {name}
 process {stage.name} {{
-{container_directive}{publish_directive}
+{errorStrategy_directive}{container_directive}{publish_directive}
     input:
     {input_format}
 

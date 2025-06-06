@@ -4,7 +4,7 @@ import os
 import json
 import argparse
 import logging
-from workflow_generator import WorkflowGenerator
+from libs.workflow_generator import WorkflowGenerator
 
 def parse_args():
     """Parse command line arguments"""
