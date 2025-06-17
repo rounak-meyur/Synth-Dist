@@ -6,6 +6,7 @@ tests/__pycache__
 logs
 results
 work
+.venv
 
 # Generated Files
 *.png
@@ -14,6 +15,8 @@ work
 *.json
 *.nextflow*
 *.log
+*.html
+*.DS_Store
 
 
 # Specific scripts

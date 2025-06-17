@@ -184,6 +184,7 @@ class SecondaryNetworkGenerator:
         penalty = kwargs.get("penalty", 0.5)
         max_rating = kwargs.get("max_rating", 25e3)
         max_hops = kwargs.get("max_hops", 10)
+        gap_rel = kwargs.get("optimality_gap", 0.20)
 
         # Generate candidate network
         graph, road_nodes = create_candidate_network(
@@ -197,7 +198,8 @@ class SecondaryNetworkGenerator:
             graph=graph,
             penalty=penalty,
             max_rating=max_rating,
-            max_hops=max_hops
+            max_hops=max_hops,
+            gap_rel=gap_rel
         )
         
         # Process and save results

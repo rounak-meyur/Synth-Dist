@@ -1,8 +1,7 @@
-state: 51
-region: 999
+state: 53
 
 inputs:
-  home_csv_dir: "data/load/"
+  home_csv_dir: "data/load"
   substation_csv: "data/substations.csv"
 
 miscellaneous:
@@ -18,6 +17,7 @@ secnet:
     penalty: 0.5
     max_rating: 25000
     max_hops: 10
+    optimality_gap: 0.20
 
 primnet:
   out_dir: "primnet/"

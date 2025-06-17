@@ -152,7 +152,8 @@ def create_secondary_distribution_network(
         graph: nx.Graph,
         penalty: float = 0.5,
         max_rating: float = 25e3,
-        max_hops: int = 10
+        max_hops: int = 10,
+        gap_rel: float = 0.20
     ) -> nx.Graph:
 
     # Step 1: Prepare the input data
@@ -199,7 +200,7 @@ def create_secondary_distribution_network(
     logger.info("Starting optimization")
 
     try:
-        problem.solve(solver=cp.SCIP, verbose=False)
+        problem.solve(solver=cp.SCIP, gaprel=gap_rel, verbose=False)
         logger.info(f"Optimization completed. Status: {problem.status}, Optimal value: {problem.value}")
     except Exception as e:
         logger.error(f"Optimization failed while solving optimization problem: {str(e)}")
