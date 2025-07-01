@@ -456,6 +456,11 @@ workflow {
         # Generate output format
         output_formats_str = self.generate_output_format(stage.outputs)
 
+        # Add tag directive if specified
+        tag_directive = ""
+        if stage.script.get('tag'):
+            tag_directive = f"    tag \"${{{stage.script['tag']}}}\"\n"
+
         # Add errorStrategy directive if specified
         errorStrategy_directive = ""
         if stage.script.get('errorStrategy'):
@@ -478,7 +483,7 @@ workflow {
         return f"""
 // Modified process definition for stage: {name}
 process {stage.name} {{
-{errorStrategy_directive}{container_directive}{publish_directive}
+{tag_directive}{errorStrategy_directive}{container_directive}{publish_directive}
     input:
     {input_format}
 
