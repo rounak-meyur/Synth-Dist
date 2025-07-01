@@ -15,11 +15,16 @@ def main():
         help = "county ID for the region",
         default = 999
     )
+    parser.add_argument(
+        "-s", "--state",
+        help = "county ID for the region",
+        default = 999
+    )
     
     args = parser.parse_args()
     configpath = args.configPath
     conf = OmegaConf.load(configpath)
-    state = conf["state"]
+    state = args.state
     region = args.region
 
     from utils.logging_utils import LogManager
@@ -86,7 +91,10 @@ def main():
         base_transformer_id=base_tsfr_id,
     )
     secnet_args = conf["secnet"]["secnet_args"]
+    total_links = len(r2h)
+    count = 0
     for road_link in r2h:
+        count += 1
         try:
             road_geometry = roads.edges(keys=True)[road_link]['geometry']
         except:
@@ -98,6 +106,7 @@ def main():
             **secnet_args
         )
         generator.save_results(prefix=region, road_link_id=road_link)
+        logger.info(f"Completed secondary network generation for {count}/{total_links} road links.")
 
     # Combine road network with transformers
     combined_network = generator.combine_networks(road_network=roads, prefix=region)

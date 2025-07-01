@@ -129,5 +129,5 @@ srun options for the Nextflow process:
 #### Run the workflow: multi-node
 
 ```shell
-srun -A cameo -p slurm --time=600 -I1200 -N 1 --pty --ntasks-per-node=1 -u /qfs/projects/cameo/bin/nextflow v2_ecomp.nf -profile deception
+srun -A cameo -p slurm --time=600 -I1200 -N 1 --pty --ntasks-per-node=1 -u /qfs/projects/cameo/bin/nextflow run_synth.nf -profile deception
 ```
