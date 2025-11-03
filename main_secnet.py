@@ -17,7 +17,7 @@ def main():
     )
     parser.add_argument(
         "-s", "--state",
-        help = "county ID for the region",
+        help = "state ID for the region",
         default = 999
     )
     
