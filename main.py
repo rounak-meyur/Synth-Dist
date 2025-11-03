@@ -18,6 +18,11 @@ def main():
         default = 999
     )
     parser.add_argument(
+        "-s", "--state",
+        help = "state ID for the region",
+        default = 999
+    )
+    parser.add_argument(
         "-p", "--generate_plot",
         help = "generate plots",
         action = "store_true"
@@ -25,9 +30,8 @@ def main():
     args = parser.parse_args()
     configpath = args.configPath
     conf = OmegaConf.load(configpath)
-    state = conf["state"]
+    state = args.state
     region = args.region
-    conf["region"] = region
 
     from utils.logging_utils import LogManager
     LogManager.initialize(
