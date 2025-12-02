@@ -16,7 +16,7 @@ if __name__ == "__main__":
     sys.path.append(parent_dir)
 
 
-from utils.dataloader import Home
+from utils.dataloader import Home, Substation
 from utils.logging_utils import LogManager
 
 if __name__ == "__main__":
@@ -183,13 +183,14 @@ def load_road_network_from_files(edgelist_file: str = 'road_network_edges.csv',
     logger.info(f"Loaded {G.number_of_edges()} edges and {G.number_of_nodes()} nodes")
     return G
 
-def plot_network(G, homes: List[Home], filename: str = 'network.png'):
+def plot_network(G, homes: List[Home], subs:List[Substation], filename: str = 'network.png'):
     """
     Plot the road network and homes, saving the plot in the 'figs' directory.
 
     Args:
         G (networkx.MultiDiGraph): The road network graph.
         homes (List[Home]): A list of Home objects to plot.
+        subs (List[Substation]): A list of Substation objects to plot.
         filename (str): The filename to save the plot (default: 'network.png').
     """
     # Ensure the 'figs' directory exists
@@ -202,11 +203,18 @@ def plot_network(G, homes: List[Home], filename: str = 'network.png'):
     logger.info(f"Plotting network with {len(G.edges)} edges and {len(homes)} homes")
 
     # Plot the graph
-    fig, ax = ox.plot_graph(G, show=False, close=False)
+    fig, ax = ox.plot_graph(
+        G, figsize=(20,20), 
+        node_size=1, node_color='black', edge_linewidth=1, bgcolor='white',
+        show=False, close=False)
 
     # Plot homes
     for home in homes:
-        ax.scatter(home.cord[0], home.cord[1], c='red', s=10, zorder=3)
+        ax.scatter(home.cord[0], home.cord[1], c='crimson', s=2, zorder=3, label="Residences")
+    
+    # Plot substations
+    for sub in subs:
+        ax.scatter(sub.cord[0], sub.cord[1], c='royalblue', s=500, zorder=3, label="Substations")
 
     # Save the plot
     fig.savefig(filepath, dpi=300, bbox_inches='tight')
@@ -215,7 +223,8 @@ def plot_network(G, homes: List[Home], filename: str = 'network.png'):
     logger.info(f"Plot saved as {filepath}")
 
 if __name__ == "__main__":
-    from dataloader import load_homes
-    test_homes = load_homes("data/load/test-home-load.csv")
+    from dataloader import load_homes, load_substations
+    test_homes = load_homes("data/load/999-home-load.csv")
+    test_subs = load_substations("data/substations.csv",test_homes)
     test_roads = load_roads(test_homes)
-    plot_network(test_roads, test_homes, filename="test_roads.png")
+    plot_network(test_roads, test_homes, test_subs, filename="test_roads.png")

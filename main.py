@@ -122,11 +122,11 @@ def main():
         combined_network_filename = conf["figures"]["combined_network"]["filename"]
         import matplotlib.pyplot as plt
         from utils.drawings import plot_combined_road_transformer, plot_substations, plot_homes
-        fig, ax = plt.subplots(1, 1, figsize=(30,18))
+        fig, ax = plt.subplots(1, 1, figsize=(30,30))
         plot_substations(subs, ax=ax)
         plot_homes(homes, ax=ax)
         plot_combined_road_transformer(combined_network, ax=ax)
-        fig.suptitle("Road network with transformers and substations", fontsize=55)
+        # fig.suptitle("Road network with transformers and substations", fontsize=55)
         fig.savefig(f"{figdir}/{region}_{combined_network_filename}", bbox_inches='tight')
 
     # Partition transformer nodes to the nearest reachable substation
@@ -174,7 +174,7 @@ def main():
                     assignment = partition_data[int(sub.id)],
                     config=primnet_config
                     )
-                generator.export_to_csv(prefix=f"test_{str(sub.id)}")
+                generator.export_to_csv(prefix=f"{region}_{str(sub.id)}")
             else:
                 logger.info(f"Primary network already generated and saved for substation {sub.id}")
     
@@ -192,9 +192,9 @@ def main():
         figdir = conf["figures"]["directory"]
         final_network_filename = conf["figures"]["final_network"]["filename"]
         Path(figdir).mkdir(parents=True, exist_ok=True)
-        fig, ax = plt.subplots(1, 1, figsize=(30,18))
+        fig, ax = plt.subplots(1, 1, figsize=(30,30))
         plot_distribution_network(distribution_network, ax=ax)
-        fig.suptitle(f"Synthetic distribution network for region: {region}", fontsize=55)
+        # fig.suptitle(f"Synthetic distribution network for region: {region}", fontsize=55)
         fig.savefig(f"figs/{region}_{final_network_filename}", bbox_inches='tight')
     
     

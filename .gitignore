@@ -14,7 +14,11 @@ work
 *.json
 *.nextflow*
 *.log
+*.DS_Store
 
 
 # Specific scripts
 clean.sh
+
+# Specific subdirectories
+scripts

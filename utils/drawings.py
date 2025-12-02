@@ -47,8 +47,8 @@ def plot_roads(roads, ax, **kwargs):
 
 def plot_homes(homes, ax, **kwargs):
     # ------ parameters for plot ------
-    color = kwargs.get("color", 'red')
-    size = kwargs.get("size", 20)
+    color = kwargs.get("color", 'crimson')
+    size = kwargs.get("size", 1)
     alpha = kwargs.get("alpha", 1.0)
     
     # ------ plot the nodes -----------
@@ -62,7 +62,7 @@ def plot_homes(homes, ax, **kwargs):
 def plot_substations(subs, ax, **kwargs):
     # ------ parameters for plot ------
     color = kwargs.get("color", 'royalblue')
-    size = kwargs.get("size", 200)
+    size = kwargs.get("size", 500)
     alpha = kwargs.get("alpha", 1.0)
     
     # ------ plot the nodes -----------
@@ -236,19 +236,19 @@ def plot_combined_road_transformer(combined_network, ax, **kwargs):
 def plot_distribution_network(combined_network, ax, **kwargs):
      # ------ parameters for plot ------
      subnodecolor = kwargs.get("substationcolor", 'royalblue')
-     subnodesize = kwargs.get("substationsize", 100)
+     subnodesize = kwargs.get("substationsize", 500)
      roadnodecolor = kwargs.get("roadnodecolor", 'black')
-     roadnodesize = kwargs.get("roadnodesize", 5)
+     roadnodesize = kwargs.get("roadnodesize", 0.5)
      tsfrnodecolor = kwargs.get("transformercolor", 'seagreen')
      tsfrnodesize = kwargs.get("transformersize", 50)
      homenodecolor = kwargs.get("homecolor", 'crimson')
-     homenodesize = kwargs.get("homesize", 20)
+     homenodesize = kwargs.get("homesize", 5)
      feededgecolor = kwargs.get("feederedgecolor", 'royalblue')
-     feededgewidth = kwargs.get("feedredgewidth", 0.8)
+     feededgewidth = kwargs.get("feedredgewidth", 1.2)
      primedgecolor = kwargs.get("primedgecolor", 'black')
-     primedgewidth = kwargs.get("primedgewidth", 0.8)
+     primedgewidth = kwargs.get("primedgewidth", 1.0)
      secedgecolor = kwargs.get("primedgecolor", 'crimson')
-     secedgewidth = kwargs.get("primedgewidth", 0.5)
+     secedgewidth = kwargs.get("primedgewidth", 0.8)
      alpha = kwargs.get("alpha", 1.0)
      style = kwargs.get("linestyle", 'dashed')
      

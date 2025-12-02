@@ -31,7 +31,7 @@ def main():
 
     # Load inputs
     ts = time.time()
-    from utils.dataloader import load_homes, load_substations
+    from utils.dataloader import load_homes
     from utils.osm_utils import load_roads, save_road_network, load_road_network_from_files
 
     input_home_csv = f"{conf['inputs']['home_csv_dir']}{region}-home-load.csv"

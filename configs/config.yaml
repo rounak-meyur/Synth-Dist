@@ -1,7 +1,7 @@
 state: 51
 
 inputs:
-  home_csv_dir: "data/load/"
+  home_csv_dir: "data/load"
   substation_csv: "data/substations.csv"
 
 miscellaneous:
@@ -27,9 +27,9 @@ primnet:
     maximum_voltage_drop: 0.15
     conductor_resistance_per_km: 0.8625
     base_impedance: 39690
-    maximum_branch_flow: 400
-    max_feeder_number: 10
-    max_feeder_capacity: 400
+    maximum_branch_flow: 800
+    max_feeder_number: 8
+    max_feeder_capacity: 800
     relative_gap: 0.05
     verbose: true
     warm_start: true
