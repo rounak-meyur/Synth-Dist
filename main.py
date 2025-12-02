@@ -5,6 +5,7 @@ def main():
     import time
     import argparse
     from omegaconf import OmegaConf
+    from tqdm import tqdm
     from pathlib import Path
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -13,9 +14,9 @@ def main():
         default = "configs/config.yaml"
     )
     parser.add_argument(
-        "-r", "--region",
+        "-r", "--region", type=str,
         help = "county ID for the region",
-        default = 999
+        default = "999"
     )
     parser.add_argument(
         "-p", "--generate_plot",
@@ -88,13 +89,13 @@ def main():
     combined_nodes = f"{conf['secnet']['out_dir']}{region}_combined_network_nodes.csv"
     if not os.path.exists(combined_edges) or not os.path.exists(combined_nodes):
         from utils.secnet_utils import SecondaryNetworkGenerator
-        base_tsfr_id = int(f"{state}{region}{conf['secnet']['base_transformer_id']}")
+        base_tsfr_id = int(f"{state}{region}{0:012d}")
         generator = SecondaryNetworkGenerator(
             output_dir=conf["secnet"]["out_dir"],
             base_transformer_id=base_tsfr_id,
         )
         secnet_args = conf["secnet"]["secnet_args"]
-        for road_link in r2h:
+        for road_link in tqdm(r2h, desc="Generating secondary network for road links"):
             try:
                 road_geometry = roads.edges(keys=True)[road_link]['geometry']
             except:
@@ -173,9 +174,10 @@ def main():
                 generator.generate_network_for_substation(
                     sub, 
                     assignment = partition_data[int(sub.id)],
-                    config=primnet_config
+                    config=primnet_config,
+                    solver=primnet_config.get("solver", "scip")
                     )
-                generator.export_to_csv(prefix=f"test_{str(sub.id)}")
+                generator.export_to_csv(prefix=f"{region}_{str(sub.id)}")
             else:
                 logger.info(f"Primary network already generated and saved for substation {sub.id}")
     

@@ -152,7 +152,9 @@ def create_secondary_distribution_network(
         graph: nx.Graph,
         penalty: float = 0.5,
         max_rating: float = 25e3,
-        max_hops: int = 10
+        max_hops: int = 10,
+        solver: str = "scip",
+        **kwargs
     ) -> nx.Graph:
 
     # Step 1: Prepare the input data
@@ -199,8 +201,22 @@ def create_secondary_distribution_network(
     logger.info("Starting optimization")
 
     try:
-        problem.solve(solver=cp.SCIP, verbose=False)
-        logger.info(f"Optimization completed. Status: {problem.status}, Optimal value: {problem.value}")
+        if solver.lower() == "scip":
+            solver_params = {
+                'limits/time': kwargs.get('time_limit', 2147483647),
+                'display/verblevel': 4 if kwargs.get('verbose',True) else 0,
+                'limits/gap': kwargs.get('relative_gap',0.01),  # Stop when gap is reached
+                'presolving/maxrounds': 0 if kwargs.get('warm_start',True) else -1,  # Disable presolving if warm start
+                }
+            problem.solve(solver=cp.SCIP, verbose=False, **solver_params)
+            logger.info(f"Optimization completed. Status: {problem.status}, Optimal value: {problem.value}")
+        
+        elif solver.lower() == "gurobi":
+            problem.solve(solver=cp.GUROBI, verbose=False, **solver_params)
+            logger.info(f"Optimization completed. Status: {problem.status}, Optimal value: {problem.value}")
+        else:
+            logger.error(f"Unsupported solver specified: {solver}")
+            return nx.Graph()
     except Exception as e:
         logger.error(f"Optimization failed while solving optimization problem: {str(e)}")
         return nx.Graph()

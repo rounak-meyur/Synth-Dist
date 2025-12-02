@@ -150,6 +150,8 @@ class SecondaryNetworkGenerator:
         penalty = kwargs.get("penalty", 0.5)
         max_rating = kwargs.get("max_rating", 25e3)
         max_hops = kwargs.get("max_hops", 10)
+        solver = kwargs.get("solver", "scip")
+        solver_params = kwargs.get("solver_parameters", {})
 
         # Generate candidate network
         graph, road_nodes = create_candidate_network(
@@ -163,7 +165,9 @@ class SecondaryNetworkGenerator:
             graph=graph,
             penalty=penalty,
             max_rating=max_rating,
-            max_hops=max_hops
+            max_hops=max_hops,
+            solver=solver,
+            **solver_params
         )
         
         # Process and save results

@@ -163,7 +163,8 @@ class PrimaryNetworkGenerator:
         self,
         sub: Substation,
         assignment: Dict[str, Dict],
-        config: PrimaryNetworkConfig
+        config: PrimaryNetworkConfig,
+        solver:str='scip'
         ):
         
         # get the combined road and transformer network mapped to the substation
@@ -182,7 +183,7 @@ class PrimaryNetworkGenerator:
             graph = nx.subgraph(self.candidate_graph, list(nodelist))
         
             # solve for optimal network
-            result, feeder_nodes = optimize_primary_network(graph, config)
+            result, feeder_nodes = optimize_primary_network(graph, solver, config)
             
             for n in feeder_nodes:
                 result.add_edge(
