@@ -45,6 +45,7 @@ class PrimaryNetworkConfig:
 
 def optimize_primary_network(
     graph: nx.MultiGraph,
+    solver: str,
     config: PrimaryNetworkConfig
     ) -> Tuple[nx.Graph, List[int]]:
     """
@@ -137,23 +138,27 @@ def optimize_primary_network(
     objective = cp.Minimize(
         (c @ x) + (dr @ (r - z))
     )
-    
-    # Solve optimization problem
-    solver_params = {
-        
-        # Logging/output control
-        'limits/time': config.get('time_limit', 2147483647),
-        'display/verblevel': 4 if config.verbose else 0,
-        'limits/gap': config.relative_gap,  # Stop when gap is reached
-        
-        # # Additional performance settings
-        # 'presolving/maxrounds': 0 if config.warm_start else -1,  # Disable presolving if warm start
-        # 'lp/threads': config.threads,  # Single thread for deterministic behavior
-    }
+
     problem = cp.Problem(objective, constraints)
     logger.info("Starting optimization")
-    problem.solve(solver=cp.SCIP, verbose=True, **solver_params)
-    logger.info(f"Optimization completed. Status: {problem.status}, Optimal value: {problem.value}")
+    
+    # Solve optimization problem
+    if solver.lower() == "scip":
+        solver_params = {
+            'limits/time': config.get('time_limit', 2147483647),
+            'display/verblevel': 4 if config.verbose else 0,
+            'limits/gap': config.relative_gap,  # Stop when gap is reached
+            'presolving/maxrounds': 0 if config.warm_start else -1,  # Disable presolving if warm start
+        }
+        try:
+            problem.solve(solver=cp.SCIP, verbose=True, **solver_params)
+            logger.info(f"Optimization completed. Status: {problem.status}, Optimal value: {problem.value}")
+        except Exception as e:
+            logger.error(f"Optimization failed with error: {e}")
+            return nx.Graph(), []
+    else:
+        logger.error(f"Solver {solver} not supported for primary network optimization.")
+        return nx.Graph(), []
     
     # Build optimized network
     result = nx.Graph()
@@ -176,7 +181,7 @@ def optimize_primary_network(
     feeder_nodes = []
     for i, n in enumerate(rnodes):
         if z.value[i] < 0.2:
-            if n not in result.nodes():
+            if n not in result.nodes() and str(n) not in result.nodes():
                 logger.error(f"Feeder node {n} is not present in the result network.")
                 raise ValueError("Identified feeder node is not in output network.")
             else:

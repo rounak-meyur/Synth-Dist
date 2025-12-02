@@ -7,6 +7,8 @@ logs
 results
 work
 
+*.DS_Store
+
 # Generated Files
 *.png
 *.csv

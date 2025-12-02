@@ -13,12 +13,17 @@ miscellaneous:
 
 secnet:
   out_dir: "out/secnet/"
-  base_transformer_id: 000000000000
   secnet_args:
     separation: 50.0
     penalty: 0.5
     max_rating: 25000
     max_hops: 10
+    solver: scip
+    solver_parameters:
+      verbose: true
+      time_limit: 600
+      warm_start: true
+      relative_gap: 0.05
 
 primnet:
   out_dir: "out/primnet/"
@@ -31,6 +36,7 @@ primnet:
     maximum_branch_flow: 400
     max_feeder_number: 10
     max_feeder_capacity: 400
+    solver: scip
     relative_gap: 0.05
     verbose: true
     warm_start: true
