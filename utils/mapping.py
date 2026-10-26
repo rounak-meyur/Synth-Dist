@@ -46,9 +46,10 @@ def retry_with_increased_padding(max_retries: int = 5, padding_increment: float 
 
             while retries < max_retries and unmapped_homes:
                 result = func(*args, **kwargs)
-                mapped_homes = [home for home, edge in result if edge is not None]
-                all_mapped_homes.extend(result)
-                unmapped_homes = [home for home in unmapped_homes if home not in mapped_homes]
+                mapped_result = [(home, edge) for home, edge in result if edge is not None]
+                all_mapped_homes.extend(mapped_result)
+                mapped_ids = {home.id for home, _ in mapped_result}
+                unmapped_homes = [home for home in unmapped_homes if home.id not in mapped_ids]
 
                 if not unmapped_homes:
                     break
@@ -59,6 +60,8 @@ def retry_with_increased_padding(max_retries: int = 5, padding_increment: float 
                 kwargs['padding_distance'] = new_padding
                 args = (args[0], unmapped_homes) + args[2:]  # Update homes list in args
 
+            # Homes still unmapped after all retries are reported once with no edge
+            all_mapped_homes.extend((home, None) for home in unmapped_homes)
             return all_mapped_homes
 
         return wrapper
