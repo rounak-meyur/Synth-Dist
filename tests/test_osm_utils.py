@@ -1,135 +1,119 @@
-import unittest
-from unittest.mock import patch, MagicMock
-import sys
-from pathlib import Path
-import pandas as pd
+from unittest.mock import MagicMock
+
 import networkx as nx
-from shapely.geometry import Point, Polygon, LineString
-from shapely.ops import unary_union
-from geopy.distance import geodesic
+import pytest
+from shapely.geometry import LineString, Point
 
-# Add the project root directory to the Python path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from conftest import grid_node_id
+from utils import osm_utils
+from utils.osm_utils import (
+    load_road_network_from_files,
+    load_roads,
+    plot_network,
+    save_road_network,
+)
 
-from utils.osm_utils import load_roads, plot_network
-from utils.dataloader import Home, load_homes
-from utils.logging_utils import LogManager
 
-if __name__ == '__main__':
-    LogManager.initialize(
-        log_file_path="logs/test_osm_utils.log", 
-        log_config_path="configs/logging_config.ini"
-    )
+@pytest.fixture
+def mock_osm(monkeypatch, road_grid):
+    """Replace the OpenStreetMap download with the synthetic grid."""
+    mock = MagicMock(return_value=road_grid)
+    monkeypatch.setattr(osm_utils.ox, "graph_from_polygon", mock)
+    return mock
 
-logger = LogManager.get_logger("unittest_osm_utils")
 
-class TestOSMUtils(unittest.TestCase):
+# load_roads
 
-    def setUp(self):
-        # Load test homes from the CSV file
-        csv_path = Path('data/load/test-home-load.csv')
-        self.test_homes = load_homes(str(csv_path))
+def test_load_roads_queries_osm_with_home_hull(mock_osm, homes):
+    load_roads(homes)
 
-    @patch('utils.osm_utils.ox.graph_from_polygon')
-    def test_load_roads(self, mock_graph_from_polygon):
-        # Create points from home coordinates
-        points = [Point(home.cord[0], home.cord[1]) for home in self.test_homes]
+    mock_osm.assert_called_once()
+    (polygon,), kwargs = mock_osm.call_args
+    assert kwargs == {"network_type": "all", "retain_all": True, "truncate_by_edge": False}
+    for home in homes:
+        assert polygon.buffer(1e-9).contains(Point(home.cord))
 
-        # Create a polygon from the points
-        polygon = Polygon(unary_union(points).convex_hull)
 
-        # Create a mock graph representing the road network
-        mock_graph = nx.MultiDiGraph()
+def test_load_roads_adds_missing_geometry(mock_osm, homes):
+    G = load_roads(homes)
 
-        # Add nodes for the road network (not directly corresponding to homes)
-        bounds = polygon.bounds
-        step_lat = (bounds[3] - bounds[1]) / 10  # Divide the bounding box into a 10x10 grid
-        step_lon = (bounds[2] - bounds[0]) / 10
-        for i in range(11):
-            for j in range(11):
-                lon = bounds[0] + i * step_lon
-                lat = bounds[1] + j * step_lat
-                if polygon.contains(Point(lon, lat)):
-                    mock_graph.add_node(f"{i}_{j}", x=lon, y=lat)
+    assert all("geometry" in d for _, _, d in G.edges(data=True))
+    u, v = grid_node_id(0, 0), grid_node_id(1, 0)
+    geom = G.edges[u, v, 0]["geometry"]
+    assert isinstance(geom, LineString)
+    assert list(geom.coords) == [(G.nodes[u]["x"], G.nodes[u]["y"]), (G.nodes[v]["x"], G.nodes[v]["y"])]
 
-        # Add some edges to connect the nodes
-        nodes = list(mock_graph.nodes(data=True))
-        for i in range(len(nodes) - 1):
-            u, u_data = nodes[i]
-            v, v_data = nodes[i+1]
-            mock_graph.add_edge(u, v, geometry=LineString([(u_data['x'], u_data['y']), (v_data['x'], v_data['y'])]))
 
-        # Add an edge without geometry to test that case
-        u, v = list(mock_graph.nodes())[:2]
-        mock_graph.add_edge(u, v)
+def test_load_roads_no_homes():
+    with pytest.raises(ValueError):
+        load_roads([])
 
-        mock_graph_from_polygon.return_value = mock_graph
 
-        # Call the function with actual test data
-        result = load_roads(self.test_homes)
+def test_load_roads_no_edges(monkeypatch, homes):
+    monkeypatch.setattr(osm_utils.ox, "graph_from_polygon", MagicMock(return_value=nx.MultiDiGraph()))
+    with pytest.raises(ValueError):
+        load_roads(homes)
 
-        # Check if the graph was created
-        self.assertIsNotNone(result)
 
-        # Check if all edges have a geometry
-        for u, v, data in result.edges(data=True):
-            self.assertIn('geometry', data)
+# save_road_network / load_road_network_from_files
 
-        # Check if the graph covers the area containing all homes
-        max_distance = geodesic((0, 0), (0, step_lat)).meters  # Convert step to meters
-        for home in self.test_homes:
-            home_point = (home.cord[1], home.cord[0])  # Note: geodesic uses (lat, lon)
-            self.assertTrue(any(geodesic(home_point, (data['y'], data['x'])).meters < max_distance
-                                for _, data in result.nodes(data=True)))
+@pytest.fixture
+def saved_grid(tmp_path, mock_osm, homes):
+    G = load_roads(homes)
+    edge_file = tmp_path / "nested" / "edges.csv"
+    node_file = tmp_path / "nested" / "nodes.csv"
+    save_road_network(G, edgelist_file=str(edge_file), nodelist_file=str(node_file))
+    return G, edge_file, node_file
 
-        # Check if the function was called with the correct parameters
-        mock_graph_from_polygon.assert_called_once()
-        args, kwargs = mock_graph_from_polygon.call_args
-        self.assertEqual(kwargs['network_type'], "all")
-        self.assertEqual(kwargs['retain_all'], True)
-        self.assertEqual(kwargs['truncate_by_edge'], False)
 
-    def test_load_roads_no_homes(self):
-        with self.assertRaises(ValueError):
-            load_roads([])
+def test_save_road_network_creates_files(saved_grid):
+    G, edge_file, node_file = saved_grid
+    assert edge_file.exists() and node_file.exists()
+    # header + one row per edge / node
+    assert len(edge_file.read_text().splitlines()) == G.number_of_edges() + 1
+    assert len(node_file.read_text().splitlines()) == G.number_of_nodes() + 1
 
-    @patch('utils.osm_utils.ox.graph_from_polygon')
-    def test_load_roads_no_edges(self, mock_graph_from_polygon):
-        mock_graph = nx.MultiDiGraph()
-        mock_graph_from_polygon.return_value = mock_graph
 
-        with self.assertRaises(ValueError):
-            load_roads(self.test_homes)
+def test_road_network_round_trip(saved_grid):
+    G, edge_file, node_file = saved_grid
+    H = load_road_network_from_files(edgelist_file=str(edge_file), nodelist_file=str(node_file))
 
-    @patch('utils.osm_utils.ox.plot_graph')
-    @patch('utils.osm_utils.plt.savefig')
-    def test_plot_network(self, mock_savefig, mock_plot_graph):
-        # Mock the graph and plot
-        mock_graph = nx.MultiDiGraph()
-        mock_fig = MagicMock()
-        mock_ax = MagicMock()
-        mock_plot_graph.return_value = (mock_fig, mock_ax)
+    assert isinstance(H, nx.MultiGraph) and not H.is_directed()
+    assert set(H.nodes) == set(G.nodes)
+    for n, data in G.nodes(data=True):
+        assert H.nodes[n]["x"] == pytest.approx(data["x"])
+        assert H.nodes[n]["y"] == pytest.approx(data["y"])
 
-        # Remove 'figs' directory if it exists
-        figs_dir = Path('figs')
-        if figs_dir.exists():
-            for file in figs_dir.iterdir():
-                file.unlink()
-            figs_dir.rmdir()
+    # Directed (u,v) and (v,u) collapse to one undirected edge per road segment
+    undirected_pairs = {frozenset((u, v)) for u, v in G.edges()}
+    assert {frozenset((u, v)) for u, v in H.edges()} == undirected_pairs
 
-        # Call the function
-        plot_network(mock_graph, self.test_homes, 'test_plot.png')
+    for u, v, key, data in H.edges(keys=True, data=True):
+        assert isinstance(data["geometry"], LineString)
+        assert data["length"] == pytest.approx(222.0)
+        assert data["highway"] == "residential"
+        assert isinstance(u, int) and isinstance(v, int) and isinstance(key, int)
 
-        # Check if 'figs' directory was created
-        self.assertTrue(figs_dir.exists())
 
-        # Check if savefig was called with the correct path
-        mock_savefig.assert_called_once_with(figs_dir / 'test_plot.png', dpi=300, bbox_inches='tight')
+@pytest.mark.parametrize("missing", ["edges", "nodes"])
+def test_load_road_network_missing_file(saved_grid, missing):
+    _, edge_file, node_file = saved_grid
+    (edge_file if missing == "edges" else node_file).unlink()
+    with pytest.raises(FileNotFoundError):
+        load_road_network_from_files(edgelist_file=str(edge_file), nodelist_file=str(node_file))
 
-        # Clean up: remove the 'figs' directory
-        for file in figs_dir.iterdir():
-            file.unlink()
-        figs_dir.rmdir()
 
-if __name__ == '__main__':
-    unittest.main()
+# plot_network
+
+def test_plot_network_saves_into_figs(tmp_path, monkeypatch, homes):
+    monkeypatch.chdir(tmp_path)
+    fig, ax = MagicMock(), MagicMock()
+    monkeypatch.setattr(osm_utils.ox, "plot_graph", MagicMock(return_value=(fig, ax)))
+    monkeypatch.setattr(osm_utils.plt, "close", MagicMock())
+
+    plot_network(nx.MultiDiGraph(), homes, "test_plot.png")
+
+    assert (tmp_path / "figs").is_dir()
+    fig.savefig.assert_called_once()
+    assert fig.savefig.call_args.args[0].as_posix() == "figs/test_plot.png"
+    assert ax.scatter.call_count == len(homes)
