@@ -10,6 +10,7 @@ from pathlib import Path
 
 import networkx as nx
 import pytest
+from geopy.distance import geodesic
 from shapely.geometry import LineString
 
 from utils.dataloader import Home
@@ -47,23 +48,27 @@ def write_homes_csv(path: Path, homes):
 
 @pytest.fixture
 def road_grid() -> nx.MultiDiGraph:
+    return make_road_grid(GRID_SIZE)
+
+
+def make_road_grid(size: int) -> nx.MultiDiGraph:
     """
-    An OSMnx-like road graph: a GRID_SIZE x GRID_SIZE grid with edges in both
+    An OSMnx-like road graph: a size x size grid with edges in both
     directions. Each edge geometry has a midpoint vertex so a home placed next
     to the midpoint has an unambiguous nearest road segment. One edge is left
     without geometry to mimic OSMnx output for straight segments.
     """
     G = nx.MultiDiGraph(crs="epsg:4326")
-    for i in range(GRID_SIZE):
-        for j in range(GRID_SIZE):
+    for i in range(size):
+        for j in range(size):
             x, y = grid_node_coord(i, j)
             G.add_node(grid_node_id(i, j), x=x, y=y)
 
-    for i in range(GRID_SIZE):
-        for j in range(GRID_SIZE):
+    for i in range(size):
+        for j in range(size):
             for di, dj in ((1, 0), (0, 1)):
                 ni, nj = i + di, j + dj
-                if ni >= GRID_SIZE or nj >= GRID_SIZE:
+                if ni >= size or nj >= size:
                     continue
                 u, v = grid_node_id(i, j), grid_node_id(ni, nj)
                 p, q = grid_node_coord(i, j), grid_node_coord(ni, nj)
@@ -122,3 +127,44 @@ def restore_logging():
             handler.close()
     root.handlers = saved_handlers
     root.setLevel(saved_level)
+
+
+# Combined road + transformer networks (as produced by combine_networks)
+
+SIZE = 16  # 256 road nodes: NetworkPartitioner keeps only cells with > 100 nodes
+
+
+def geodesic_m(a, b):
+    return geodesic((a[1], a[0]), (b[1], b[0])).meters
+
+
+def make_combined_grid(size: int = SIZE, barrier_at: int = None) -> nx.MultiGraph:
+    """
+    A combined road + transformer network as produced by combine_networks: a grid of road
+    nodes ('R') where every horizontal road link carries a transformer ('T') at its midpoint.
+
+    barrier_at: remove the horizontal links between columns barrier_at and barrier_at + 1
+    except on the top row (e.g. a river with a single bridge).
+    """
+    G = nx.MultiGraph()
+    for i in range(size):
+        for j in range(size):
+            G.add_node(grid_node_id(i, j), cord=grid_node_coord(i, j), label="R", load=0.0)
+
+    def link(a, b):
+        ca, cb = G.nodes[a]["cord"], G.nodes[b]["cord"]
+        G.add_edge(a, b, length=geodesic_m(ca, cb), highway="residential", geometry=LineString([ca, cb]))
+
+    for i in range(size):
+        for j in range(size):
+            u = grid_node_id(i, j)
+            if j + 1 < size:
+                link(u, grid_node_id(i, j + 1))
+            if i + 1 < size and not (barrier_at == i and j != size - 1):
+                v = grid_node_id(i + 1, j)
+                (x1, y1), (x2, y2) = G.nodes[u]["cord"], G.nodes[v]["cord"]
+                t = f"T{i:02d}{j:02d}"
+                G.add_node(t, cord=((x1 + x2) / 2, (y1 + y2) / 2), label="T", load=1000.0)
+                link(u, t)
+                link(t, v)
+    return G

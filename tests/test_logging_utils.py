@@ -41,3 +41,19 @@ def test_get_logger_is_cached():
 
 def test_get_logger_defaults_to_caller_module():
     assert LogManager.get_logger().name == __name__
+
+
+def test_progress_logging_keeps_console_level(tmp_path, restore_logging, capsys):
+    from utils.logging_utils import progress_logging
+
+    LogManager.initialize(log_file_path=str(tmp_path / "app.log"), log_config_path=LOG_CONFIG)
+    logger = LogManager.get_logger("progress_test")
+    capsys.readouterr()
+    with progress_logging():
+        logger.info("info message")
+        logger.warning("warning message")
+    out = capsys.readouterr()
+    console = out.out + out.err
+    assert "warning message" in console
+    assert "info message" not in console, "INFO must stay out of the console (WARNING level)"
+    assert "info message" in (tmp_path / "app.log").read_text()
