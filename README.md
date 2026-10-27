@@ -26,24 +26,44 @@ SYNGRID is a Python-based toolkit for generating synthetic electrical distributi
 
 ## 🏗️ Project Structure
 ```
-syngrid/
-├── models/                  # Core optimization models
-│   ├── primnet.py           # Primary network optimization
-│   └── secnet.py            # Secondary network optimization
+Synth-Dist/
+├── .github/workflows/
+│   └── tests.yml            # GitHub Actions CI (runs pytest via uv)
+├── models/                  # Core network construction models
+│   ├── primnet.py           # Primary network optimization (MILP)
+│   ├── primnet_heuristic.py # Primary network heuristic
+│   ├── secnet.py            # Secondary network optimization (MILP)
+│   └── secnet_heuristic.py  # Secondary network heuristic
 ├── utils/                   # Utility functions
+│   ├── checkpoint_utils.py  # Pipeline checkpointing
 │   ├── dataloader.py        # Data loading utilities
 │   ├── drawings.py          # Visualization functions
+│   ├── finalnet_utils.py    # Combining primary/secondary into the final network
 │   ├── logging_utils.py     # Logging configuration
 │   ├── mapping.py           # Geospatial mapping utilities
 │   ├── osm_utils.py         # OpenStreetMap integration
 │   ├── partition_utils.py   # Network partitioning
 │   ├── primnet_utils.py     # Primary network utilities
-│   └── secnet_utils.py      # Secondary network utilities
+│   ├── secnet_utils.py      # Secondary network utilities
+│   └── stats_utils.py       # Run statistics
+├── scripts/                 # Standalone helper scripts
+│   ├── downloader.py        # net.science CSV downloader
+│   ├── get_load_csv.py      # Build per-region home load CSVs
+│   └── homes.py             # Collect home IDs into out/homes.json
+├── tests/                   # pytest suite
 ├── configs/                 # Configuration files
-├── data/                    # Input data directory
-├── figs/                    # Output figures
-├── logs/                    # Log files
+│   ├── config_heuristic.yaml
+│   ├── config_milp.yaml
+│   └── logging_config.ini
+├── data/                    # Input data
+│   ├── load/                # Home load CSVs (<region>-home-load.csv)
+│   └── substations.csv      # Substation locations
+├── out/, figs/, logs/, cache/  # Generated outputs (git-ignored)
 ├── main.py                  # Main execution script
+├── pyproject.toml           # Project metadata and dependencies (uv)
+├── uv.lock                  # Locked dependency versions
+├── .python-version          # Python version for uv (3.12)
+├── Dockerfile               # Container build
 ├── syndist.yml              # Conda environment file
 └── README.md                # This file
 ```
