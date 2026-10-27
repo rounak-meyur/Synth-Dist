@@ -1,22 +1,63 @@
-*__pycache__*
-.pytest_cache
-cache
-gurobi
-tests/__pycache__
-logs
-results
-work
+# ---------------------------------------------------------------
+# Pipeline outputs
+# ---------------------------------------------------------------
+out/
+figs/
+logs/
+results/
+# OSMnx HTTP response cache
+cache/
 
-*.DS_Store
-
-# Generated Files
+# Generated files (tracked inputs such as data/load/*.csv stay tracked)
 *.png
 *.csv
 *.txt
 *.json
-*.nextflow*
 *.log
 
+# Nextflow
+work/
+.nextflow/
+.nextflow.log*
+*.nextflow*
+
+# ---------------------------------------------------------------
+# Python / uv / test artifacts
+# ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.uv-cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+report.xml
+
+# ---------------------------------------------------------------
+# Machine / user specific
+# ---------------------------------------------------------------
+# Solver licenses and installs
+gurobi/
+gurobi.lic
+# Environment variables / secrets
+.env
+.env.*
+# Editors and IDEs
+.vscode/
+.idea/
+*.swp
+*~
+# OS
+.DS_Store
+Thumbs.db
+# Jupyter
+.ipynb_checkpoints/
 
 # Specific scripts
 clean.sh
