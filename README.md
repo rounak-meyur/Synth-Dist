@@ -55,23 +55,24 @@ git clone https://github.com/yourusername/syngrid.git
 cd syngrid
 ```
 
-2. Create a virtual environment and install dependencies:
+2. Create the environment with [uv](https://docs.astral.sh/uv/) (dependencies are in `pyproject.toml`, pinned in `uv.lock`):
 ```bash
-conda env create -f syndist.yml
+uv sync
 ```
 
-3. Activate environment:
+3. Run the tests:
 ```bash
-conda activate synth
+uv run pytest
 ```
+Tests marked `integration` need the cached road network in `out/interim/` and are skipped when it is absent (e.g. in CI).
 
 ## 📦 Dependencies
-- Python 3.8+
+- Python 3.11+
 - NetworkX
 - CVXPY
 - PySCIPOpt
 - NumPy
-- Other dependencies listed in `syndist.yml`
+- Other dependencies listed in `pyproject.toml`
 
 ## 🚀 Usage
 
@@ -82,13 +83,35 @@ conda activate synth
 
 2. Run the main script:
 ```bash
-python main.py -c configs/config.yaml -r region_ID
+uv run main.py -c configs/config_heuristic.yaml -r region_ID
 ```
 
 To generate visualization plots, add the `-p` flag:
 ```bash
-python main.py -c configs/config.yaml -r region_ID -p
+uv run main.py -c configs/config_heuristic.yaml -r region_ID -p
 ```
+
+### Checkpoints and run statistics
+Each stage (roads, mapping, secondary network, partitioning, primary network, final
+network) saves its outputs and is
+reused by later runs. A stage is rerun when its inputs or parameters change, when an
+earlier stage was rerun, or when its outputs are missing; the record is kept in
+`out/interim/{region}_checkpoints.json`. An interrupted secondary network stage resumes
+from the road links that already finished.
+
+To ignore saved outputs and run every stage again, use `--from-scratch` (or set
+`miscellaneous.from_scratch: true` in the config):
+```bash
+uv run main.py -c configs/config_heuristic.yaml -r region_ID --from-scratch
+```
+
+The final distribution network (substations, road nodes, transformers and homes with
+feeder, primary and secondary lines) is written to
+`out/finalnet/{region}_distribution_network_nodes.csv` and `_edges.csv`.
+
+Compute time, peak memory and data sizes (homes, road nodes/edges, transformers,
+secondary edges, per-substation partitions, ...) of every stage are written to
+`out/stats/{region}_run_stats.json`.
 
 ## 📊 Configuration file
 
