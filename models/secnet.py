@@ -30,7 +30,8 @@ def create_candidate_network(
         road_edge_geometry: LineString,
         mapped_homes: List[Home],
         nearest_homes: Optional[int] = None,
-        minimum_separation: float = 50.0
+        minimum_separation: float = 50.0,
+        min_transformers: int = 1
     ) -> Tuple[nx.Graph, List[Union[int, str]]]:
     """
     Create an undirected graph representing the candidate set of edges for the optimal secondary distribution network.
@@ -40,6 +41,9 @@ def create_candidate_network(
         mapped_homes (List[Home]): List of homes mapped to the road edge.
         nearest_homes (Optional[int]): Minimum number of homes to consider for direct transformer connection.
         minimum_separation (float): Minimum distance in meters between points on the road edge geometry.
+        min_transformers (int): Minimum number of probable transformers on the road edge. Short road
+            edges with many homes get more candidates than `minimum_separation` allows (see
+            `minimum_transformers`).
 
     Returns:
         Tuple containing:
@@ -53,7 +57,7 @@ def create_candidate_network(
     end_node = road_edge[1]
 
     # 1. Interpolate points along the road edge geometry
-    probable_transformers = interpolate_points(road_edge_geometry, minimum_separation)
+    probable_transformers = interpolate_points(road_edge_geometry, minimum_separation, min_points=min_transformers)
     logger.info(f"Interpolated {len(probable_transformers)} probable transformer locations")
 
     # 2. Label homes and probable transformers
@@ -98,8 +102,17 @@ def create_candidate_network(
     ordered_nodes = [start_node] + [f"T{i}" for i in range(len(probable_transformers))] + [end_node]
     return G, ordered_nodes
 
-def interpolate_points(geometry: LineString, min_separation: float) -> List[Tuple[float, float]]:
-    """Interpolate points along the geometry at the specified minimum separation using geodesic distance."""
+def interpolate_points(
+        geometry: LineString,
+        min_separation: float,
+        min_points: int = 1
+    ) -> List[Tuple[float, float]]:
+    """
+    Interpolate points along the geometry at the specified minimum separation using geodesic distance.
+
+    If that gives fewer than `min_points` points (short road edges), `min_points` points are spaced
+    evenly along the geometry instead, at fractions (k + 0.5) / min_points of its length.
+    """
     points = []
     coords = list(geometry.coords)
     total_length = sum(geodesic(coord[::-1], coords[i+1][::-1]).meters for i, coord in enumerate(coords[:-1]))
@@ -108,7 +121,28 @@ def interpolate_points(geometry: LineString, min_separation: float) -> List[Tupl
         point = geometry.interpolate(distance / total_length, normalized=True)
         points.append((point.x, point.y))
         distance += min_separation
+    if len(points) < min_points:
+        points = []
+        for k in range(min_points):
+            point = geometry.interpolate((k + 0.5) / min_points, normalized=True)
+            points.append((point.x, point.y))
     return points
+
+def minimum_transformers(loads: List[float], max_rating: float) -> int:
+    """
+    Number of transformers of rating `max_rating` needed to serve the given home loads,
+    using first-fit decreasing bin packing (loads cannot be split between transformers).
+    A home whose load alone exceeds the rating needs a transformer of its own.
+    """
+    bins: List[float] = []
+    for load in sorted(loads, reverse=True):
+        for i, used in enumerate(bins):
+            if used + load <= max_rating:
+                bins[i] += load
+                break
+        else:
+            bins.append(load)
+    return max(1, len(bins))
 
 def label_points(geometry: LineString, homes: List[Home], transformers: List[Tuple[float, float]]) -> List[Tuple[Union[Home, Tuple[float, float]], int]]:
     """Label points as being on one side or the other of the geometry."""
