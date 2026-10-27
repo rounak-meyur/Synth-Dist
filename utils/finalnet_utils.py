@@ -1,10 +1,21 @@
+"""
+Combine the primary networks (one per substation) and the secondary network into the
+final synthetic distribution network of a region.
+
+Node labels: 'S' substation, 'R' road node, 'T' transformer, 'H' home.
+Edge labels: 'feeder' (substation to feeder road node), 'primary', 'secondary'.
+"""
+from collections import Counter
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Union
-import networkx as nx
-import pandas as pd
-from shapely.geometry import LineString, Point
+from typing import Any, Dict, List, Tuple, Union
+import json
 import os
 import sys
+
+import networkx as nx
+import pandas as pd
+import shapely.wkt as wkt
+from shapely.geometry import LineString
 
 if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -16,231 +27,235 @@ from utils.logging_utils import LogManager
 
 if __name__ == "__main__":
     LogManager.initialize(
-        log_file_path="logs/test_finalnet_utils.log", 
+        log_file_path="logs/test_finalnet_utils.log",
         log_config_path="configs/logging_config.ini"
     )
 
 logger = LogManager.get_logger("finalnet_utils")
 
-def _parse_cord_string(cord_str: str) -> Tuple[float, float]:
-    """
-    Parse coordinate string into a tuple of floats.
-    
-    Args:
-        cord_str (str): String representation of coordinates
-        
-    Returns:
-        Tuple[float, float]: Tuple of (longitude, latitude)
-    """
-    try:
-        # Remove brackets and split
-        cord_str = cord_str.strip('[]()').replace(' ', '')
-        lon, lat = map(float, cord_str.split(','))
-        return (lon, lat)
-    except (ValueError, AttributeError) as e:
-        logger.error(f"Error parsing coordinate string: {cord_str}")
-        raise ValueError(f"Invalid coordinate format: {cord_str}") from e
 
-def _create_edge_geometry(node1_cord: Tuple[float, float], node2_cord: Tuple[float, float]) -> LineString:
-    """
-    Create a LineString geometry from two node coordinates.
-    
-    Args:
-        node1_cord (Tuple[float, float]): Coordinates of first node
-        node2_cord (Tuple[float, float]): Coordinates of second node
-        
-    Returns:
-        LineString: LineString geometry connecting the nodes
-    """
-    return LineString([node1_cord, node2_cord])
+def _parse_cord(value: Any) -> Tuple[float, float]:
+    """Parse a coordinate saved as a JSON list "[lon, lat]" (or a tuple string "(lon, lat)")."""
+    try:
+        if isinstance(value, str):
+            value = json.loads(value.replace("(", "[").replace(")", "]"))
+        lon, lat = value
+        return (float(lon), float(lat))
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"Invalid coordinate format: {value}") from e
+
+
+def _parse_geometry(value: Any, u_cord, v_cord) -> LineString:
+    """Parse a WKT geometry; missing geometries become straight lines between the end nodes."""
+    if isinstance(value, str) and value not in ("", "None"):
+        return wkt.loads(value)
+    return LineString([u_cord, v_cord])
+
 
 def combine_networks(
-    sub_ids: List[str], 
-    region_name: str, 
-    homes: List[Home], 
+    sub_ids: List[str],
+    region_name: str,
+    homes: List[Home],
     prim_dir: str,
     sec_dir: str
     ) -> nx.Graph:
     """
     Combine primary and secondary distribution networks into a single graph.
-    
+
     Args:
-        sub_ids (List[str]): List of substation IDs
-        region_name (str): Name of the region for secondary network files
-        homes (List[Home]): List of Home objects containing coordinate information
-        prim_dir (str): Directory containing primary network files
-        sec_dir (str): Directory containing secondary network files
-        
+        sub_ids (List[str]): List of service substation IDs
+        region_name (str): Name of the region (prefix of the network files)
+        homes (List[Home]): List of Home objects (coordinates and loads)
+        prim_dir (str): Directory with <region>_<substation>_nodes.csv / _edges.csv
+        sec_dir (str): Directory with <region>_secondary_edges.csv
+
     Returns:
-        nx.Graph: Combined network graph
-        
+        nx.Graph: Combined network graph. Node IDs are strings; nodes carry 'cord', 'label'
+            and 'load', edges carry 'geometry', 'label' and 'length'.
+
     Raises:
-        FileNotFoundError: If required files are not found
-        ValueError: If data format is invalid
+        FileNotFoundError: If a primary or the secondary network file is missing
+        ValueError: If a file has an invalid format, or a secondary edge refers to a node
+            that is neither a home nor a transformer of the primary networks
     """
     logger.info(f"Combining networks for {len(sub_ids)} substations in region {region_name}")
-    
-    # Initialize combined graph
-    combined_graph = nx.Graph()
-    
-    # Create home ID to coordinates mapping
-    home_coords = {str(home.id): home.cord for home in homes}
-    
-    # First, load and combine primary networks for each substation
+    graph = nx.Graph()
+
+    # Primary networks of every substation
     for sub_id in sub_ids:
         node_file = Path(prim_dir) / f"{region_name}_{sub_id}_nodes.csv"
         edge_file = Path(prim_dir) / f"{region_name}_{sub_id}_edges.csv"
-        
-        if not node_file.exists() or not edge_file.exists():
-            logger.warning(f"Files not found for substation {sub_id}")
-            continue
-            
-        try:
-            # Load nodes
-            nodes_df = pd.read_csv(node_file)
-            for _, row in nodes_df.iterrows():
-                node_id = str(row['node_id'])
-                # Parse coordinates if they exist
-                try:
-                    cord = _parse_cord_string(str(row['cord']))
-                except ValueError:
-                    logger.warning(f"Invalid coordinate format for node {node_id}")
-                    continue
-                
-                # Add node with attributes
-                combined_graph.add_node(
-                    node_id,
-                    cord=cord,
-                    label=row['label']
-                )
-            
-            # Load edges
-            edges_df = pd.read_csv(edge_file)
-            for _, row in edges_df.iterrows():
-                source = str(row['source'])
-                target = str(row['target'])
-                
-                if source in combined_graph and target in combined_graph:
-                    # Get node coordinates
-                    source_cord = combined_graph.nodes[source]['cord']
-                    target_cord = combined_graph.nodes[target]['cord']
-                    
-                    # Create geometry
-                    geometry = _create_edge_geometry(source_cord, target_cord)
-                    
-                    # Add edge with attributes
-                    combined_graph.add_edge(
-                        source,
-                        target,
-                        geometry=geometry,
-                        label=row['label'],
-                        length=row['length']
-                    )
-                
-        except Exception as e:
-            logger.error(f"Error processing files for substation {sub_id}: {str(e)}")
-            continue
-    
-    # Load secondary network
-    secondary_file = Path(sec_dir) / f"{region_name}_secondary_edges.csv"
-    
-    if secondary_file.exists():
-        try:
-            secondary_df = pd.read_csv(secondary_file)
-            
-            # Process secondary edges
-            for _, row in secondary_df.iterrows():
-                from_node = str(row['from_node'])
-                to_node = str(row['to_node'])
-                
-                # Add nodes if they don't exist (should be homes)
-                for node in [from_node, to_node]:
-                    if node not in combined_graph:
-                        if node in home_coords:
-                            combined_graph.add_node(
-                                node,
-                                cord=home_coords[node],
-                                label='H'
-                            )
-                        else:
-                            logger.warning(f"Home coordinates not found for node {node}")
-                            continue
-                
-                # Add edge if both nodes exist
-                if from_node in combined_graph and to_node in combined_graph:
-                    # Get node coordinates
-                    from_cord = combined_graph.nodes[from_node]['cord']
-                    to_cord = combined_graph.nodes[to_node]['cord']
-                    
-                    # Create geometry
-                    geometry = _create_edge_geometry(from_cord, to_cord)
-                    
-                    # Add edge with attributes
-                    combined_graph.add_edge(
-                        from_node,
-                        to_node,
-                        geometry=geometry,
-                        label='secondary',
-                        length=row['length']
-                    )
-                    
-        except Exception as e:
-            logger.error(f"Error processing secondary network file: {str(e)}")
-    else:
-        logger.warning(f"Secondary network file not found: {secondary_file}")
-    
-    # Log summary statistics
-    logger.info(f"Combined network has {combined_graph.number_of_nodes()} nodes and {combined_graph.number_of_edges()} edges")
-    
-    return combined_graph
+        for path in (node_file, edge_file):
+            if not path.exists():
+                raise FileNotFoundError(f"Primary network file not found for substation {sub_id}: {path}")
 
-def save_combined_network(
+        nodes_df = pd.read_csv(node_file, dtype={"node_id": str})
+        for _, row in nodes_df.iterrows():
+            node_id = row["node_id"]
+            if node_id in graph and graph.nodes[node_id]["label"] != "R":
+                raise ValueError(f"Node {node_id} appears in more than one primary network")
+            graph.add_node(node_id, cord=_parse_cord(row["cord"]), label=row["label"], load=float(row["load"]))
+
+        edges_df = pd.read_csv(edge_file, dtype={"source": str, "target": str})
+        for _, row in edges_df.iterrows():
+            u, v = row["source"], row["target"]
+            if u not in graph or v not in graph:
+                raise ValueError(f"Primary edge ({u}, {v}) of substation {sub_id} refers to an unknown node")
+            graph.add_edge(
+                u, v,
+                geometry=_parse_geometry(row.get("geometry"), graph.nodes[u]["cord"], graph.nodes[v]["cord"]),
+                label=row["label"],
+                length=float(row["length"]),
+            )
+
+    # Secondary network: homes hang from the transformers of the primary networks
+    secondary_file = Path(sec_dir) / f"{region_name}_secondary_edges.csv"
+    if not secondary_file.exists():
+        raise FileNotFoundError(f"Secondary network file not found: {secondary_file}")
+    home_by_id = {str(home.id): home for home in homes}
+    secondary_df = pd.read_csv(secondary_file, dtype={"from_node": str, "to_node": str})
+    for _, row in secondary_df.iterrows():
+        u, v = row["from_node"], row["to_node"]
+        for node in (u, v):
+            if node in graph:
+                continue
+            if node in home_by_id:
+                home = home_by_id[node]
+                graph.add_node(node, cord=tuple(home.cord), label="H", load=float(home.load))
+            elif node.startswith("T"):
+                raise ValueError(f"Transformer {node} of the secondary network is not in any primary network")
+            else:
+                raise ValueError(f"Secondary network node {node} is neither a home nor a transformer")
+        graph.add_edge(
+            u, v,
+            geometry=LineString([graph.nodes[u]["cord"], graph.nodes[v]["cord"]]),
+            label="secondary",
+            length=float(row["length"]),
+        )
+
+    logger.info(f"Combined network has {graph.number_of_nodes()} nodes and {graph.number_of_edges()} edges")
+    return graph
+
+
+def validate_distribution_network(graph: nx.Graph, homes: List[Home] = ()) -> Dict[str, Any]:
+    """
+    Check the structure of the combined distribution network.
+
+    The network must be a forest with exactly one substation per tree, and every home must
+    be connected. Problems are logged as warnings and returned.
+
+    Returns:
+        Dict[str, Any]: is_forest, trees, trees_without_substation, trees_with_several_substations,
+            homes_missing (IDs of homes not in the network) and isolated_nodes
+    """
+    components = list(nx.connected_components(graph))
+    substations_per_tree = [sum(1 for n in c if graph.nodes[n]["label"] == "S") for c in components]
+    home_ids = {str(h.id) for h in homes}
+    report = {
+        "is_forest": nx.is_forest(graph) if graph.number_of_nodes() else True,
+        "trees": len(components),
+        "trees_without_substation": sum(1 for k in substations_per_tree if k == 0),
+        "trees_with_several_substations": sum(1 for k in substations_per_tree if k > 1),
+        "homes_missing": sorted(home_ids - set(graph.nodes)),
+        "isolated_nodes": sorted(n for n in graph if graph.degree(n) == 0),
+    }
+    if not report["is_forest"]:
+        logger.warning("The distribution network contains cycles")
+    if report["trees_without_substation"] or report["trees_with_several_substations"]:
+        logger.warning(
+            f"{report['trees_without_substation']} trees without a substation and "
+            f"{report['trees_with_several_substations']} trees with several substations"
+        )
+    if report["homes_missing"]:
+        logger.warning(f"{len(report['homes_missing'])} homes are not connected to the distribution network")
+    if report["isolated_nodes"]:
+        logger.warning(f"{len(report['isolated_nodes'])} isolated nodes in the distribution network")
+    return report
+
+
+def save_distribution_network(
     graph: nx.Graph,
     region_name: str,
-    out_dir: str = None
-) -> None:
+    out_dir: str
+) -> Tuple[Path, Path]:
     """
-    Save the combined network to CSV files.
-    
-    Args:
-        graph (nx.Graph): Combined network graph
-        region_name (str): Name of the region for output files
-        out_dir (str): Output directory
+    Save the combined network to <region>_distribution_network_nodes.csv / _edges.csv.
+
+    Returns:
+        Tuple[Path, Path]: Paths of the nodes and edges files
     """
-    
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
-    
-    # Save nodes
-    nodes_data = []
-    for node, attrs in graph.nodes(data=True):
-        nodes_data.append({
-            'node_id': node,
-            'cord': attrs['cord'],
-            'label': attrs['label']
-        })
-    
-    
-    pd.DataFrame(nodes_data).to_csv(
-        out_path / f"{region_name}_combined_nodes.csv",
-        index=False
-    )
-    
-    # Save edges
-    edges_data = []
-    for u, v, attrs in graph.edges(data=True):
-        edges_data.append({
-            'source': u,
-            'target': v,
-            'geometry': attrs['geometry'].wkt,
-            'label': attrs['label'],
-            'length': attrs['length']
-        })
-    
-    
-    pd.DataFrame(edges_data).to_csv(
-        out_path / f"{region_name}_combined_edges.csv",
-        index=False
-    )
-    
-    logger.info(f"Saved combined network files for region {region_name}")
+    nodes_file = out_path / f"{region_name}_distribution_network_nodes.csv"
+    edges_file = out_path / f"{region_name}_distribution_network_edges.csv"
+
+    nodes_df = pd.DataFrame([
+        {
+            "node_id": node,
+            "longitude": attrs["cord"][0],
+            "latitude": attrs["cord"][1],
+            "label": attrs["label"],
+            "load": attrs.get("load", 0.0),
+        }
+        for node, attrs in graph.nodes(data=True)
+    ], columns=["node_id", "longitude", "latitude", "label", "load"])
+    edges_df = pd.DataFrame([
+        {
+            "source": u,
+            "target": v,
+            "label": attrs["label"],
+            "length": attrs["length"],
+            "geometry": attrs["geometry"].wkt,
+        }
+        for u, v, attrs in graph.edges(data=True)
+    ], columns=["source", "target", "label", "length", "geometry"])
+
+    # write to temporary files first so an interrupted run never leaves a partial file
+    for df, path in ((nodes_df, nodes_file), (edges_df, edges_file)):
+        tmp = path.with_suffix(".tmp")
+        df.to_csv(tmp, index=False)
+        os.replace(tmp, path)
+
+    logger.info(f"Saved distribution network files for region {region_name}")
+    return nodes_file, edges_file
+
+
+def load_distribution_network(nodes_file: Union[str, Path], edges_file: Union[str, Path]) -> nx.Graph:
+    """Load a network saved by `save_distribution_network`."""
+    for path in (nodes_file, edges_file):
+        if not Path(path).exists():
+            raise FileNotFoundError(f"Distribution network file not found: {path}")
+    graph = nx.Graph()
+    for _, row in pd.read_csv(nodes_file, dtype={"node_id": str}).iterrows():
+        graph.add_node(
+            row["node_id"],
+            cord=(float(row["longitude"]), float(row["latitude"])),
+            label=row["label"],
+            load=float(row["load"]),
+        )
+    for _, row in pd.read_csv(edges_file, dtype={"source": str, "target": str}).iterrows():
+        u, v = row["source"], row["target"]
+        graph.add_edge(
+            u, v,
+            geometry=_parse_geometry(row["geometry"], graph.nodes[u]["cord"], graph.nodes[v]["cord"]),
+            label=row["label"],
+            length=float(row["length"]),
+        )
+    return graph
+
+
+def distribution_network_summary(graph: nx.Graph) -> Dict[str, Any]:
+    """Counts of nodes and edges by label and line lengths (km) by edge label."""
+    nodes = Counter(d["label"] for _, d in graph.nodes(data=True))
+    edges = Counter(d["label"] for _, _, d in graph.edges(data=True))
+    length = Counter()
+    for _, _, d in graph.edges(data=True):
+        length[d["label"]] += d["length"]
+    return {
+        "nodes": graph.number_of_nodes(),
+        "edges": graph.number_of_edges(),
+        "nodes_by_label": dict(sorted(nodes.items())),
+        "edges_by_label": dict(sorted(edges.items())),
+        "length_km_by_label": {k: round(v / 1000, 3) for k, v in sorted(length.items())},
+        "home_load_total": round(sum(d["load"] for _, d in graph.nodes(data=True) if d["label"] == "H"), 3),
+    }

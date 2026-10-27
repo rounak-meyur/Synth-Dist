@@ -16,7 +16,9 @@ if __name__ == "__main__":
     sys.path.append(parent_dir)
 
 from utils.dataloader import Substation
+from omegaconf import DictConfig, OmegaConf
 from models.primnet import PrimaryNetworkConfig, optimize_primary_network
+from models.primnet_heuristic import create_primary_network_heuristic
 from utils.logging_utils import LogManager
 
 if __name__ == "__main__":
@@ -26,6 +28,16 @@ if __name__ == "__main__":
     )
 
 logger = LogManager.get_logger("primnet_utils")
+
+PRIMNET_METHODS = ("milp", "heuristic")
+
+
+def _milp_config(config, parameters) -> DictConfig:
+    """Physical primary network parameters merged with the MILP solver parameters."""
+    as_dict = lambda c: OmegaConf.to_container(c, resolve=True) if isinstance(c, DictConfig) else dict(c)
+    merged = {k: v for k, v in as_dict(config).items() if k not in ("method", "parameters")}
+    merged.update(as_dict(parameters))
+    return OmegaConf.create(merged)
 
 
 class PrimaryNetworkGenerator:
@@ -120,10 +132,14 @@ class PrimaryNetworkGenerator:
             if not all(key in attrs for key in ['highway', 'geometry', 'length']):
                 raise ValueError(f"Missing required attributes for edge {edge_key}")
             
-            # Process attributes
+            # Process attributes; a missing geometry is saved as "None" by save_partitioning
+            if attrs['geometry'] in (None, '', 'None'):
+                geometry = LineString([graph.nodes[from_node]['cord'], graph.nodes[to_node]['cord']])
+            else:
+                geometry = parse_geometry(attrs['geometry'])
             edge_attrs = {
                 'highway': attrs['highway'],
-                'geometry': parse_geometry(attrs['geometry']),
+                'geometry': geometry,
                 'length': attrs['length']
             }
             
@@ -166,7 +182,24 @@ class PrimaryNetworkGenerator:
         config: PrimaryNetworkConfig,
         solver:str='scip'
         ):
-        
+        """
+        Generate the primary network for a substation.
+
+        Args:
+            sub (Substation): The substation
+            assignment (Dict[str, Dict]): Partition data of the substation (nodelist and edgelist)
+            config: primnet_args from the configuration file
+                method (Optional[str]): "milp" (default) or "heuristic"
+                parameters (Optional[dict]): Parameters for the selected method
+                    milp: solver, verbose, time_limit, warm_start, relative_gap, threads
+                    heuristic: feeder_voltage
+            solver (str): MILP solver, used when parameters do not set one
+        """
+        method = str(config.get("method", "milp")).lower()
+        parameters = config.get("parameters") or {}
+        if method not in PRIMNET_METHODS:
+            raise ValueError(f"Unknown primary network method '{method}'. Choose from {PRIMNET_METHODS}.")
+
         # get the combined road and transformer network mapped to the substation
         total_graph = self._reconstruct_graph_from_dict(assignment)
         total_load = 1e-3*sum(nx.get_node_attributes(total_graph,'load').values())
@@ -183,7 +216,13 @@ class PrimaryNetworkGenerator:
             graph = nx.subgraph(self.candidate_graph, list(nodelist))
         
             # solve for optimal network
-            result, feeder_nodes = optimize_primary_network(graph, solver, config)
+            if method == "heuristic":
+                result, feeder_nodes = create_primary_network_heuristic(graph, config, **parameters)
+            else:
+                milp_config = _milp_config(config, parameters)
+                result, feeder_nodes = optimize_primary_network(
+                    graph, milp_config.get("solver", solver), milp_config
+                )
             
             for n in feeder_nodes:
                 result.add_edge(
@@ -239,8 +278,11 @@ class PrimaryNetworkGenerator:
         nodes_df = self._create_nodes_dataframe(self.optimal_graph)
         edges_df = self._create_edges_dataframe(self.optimal_graph)
         
-        nodes_df.to_csv(nodes_file, index=False)
-        edges_df.to_csv(edges_file, index=False)
+        # write to temporary files first so an interrupted run never leaves a partial file
+        for df, path in ((nodes_df, nodes_file), (edges_df, edges_file)):
+            tmp = path.with_suffix(".tmp")
+            df.to_csv(tmp, index=False)
+            os.replace(tmp, path)
         
         return
     

@@ -152,9 +152,7 @@ class NetworkPartitioner:
         
         candidate_nodes = self.spatial_index.intersect(search_bbox)
         if not candidate_nodes:
-            err_msg = f"No nodes found within radius {search_radius}"
-            logger.error(err_msg)
-            raise ValueError(err_msg)
+            raise ValueError(f"No nodes found within radius {search_radius}")
         
         return candidate_nodes
     

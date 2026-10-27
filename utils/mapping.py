@@ -1,5 +1,6 @@
 import networkx as nx
 from pyqtree import Index
+from tqdm import tqdm
 from typing import List, Tuple, Dict, Callable
 from geopy.distance import geodesic
 from shapely.ops import unary_union
@@ -18,7 +19,7 @@ if __name__ == "__main__":
 
 
 from utils.dataloader import Home
-from utils.logging_utils import LogManager
+from utils.logging_utils import LogManager, progress_logging
 
 if __name__ == "__main__":
     LogManager.initialize(
@@ -103,32 +104,34 @@ def map_homes_to_edges(
 
     mapped_homes = []
 
-    for home in homes:
-        home_point = Point(home.cord[0], home.cord[1])
-        home_box = home_point.buffer(padding_distance).bounds
+    # Route console log messages through tqdm so they do not break the progress bar
+    with progress_logging():
+        for home in tqdm(homes, desc=f"Mapping homes to roads (padding={padding_distance:g})", unit="home"):
+            home_point = Point(home.cord[0], home.cord[1])
+            home_box = home_point.buffer(padding_distance).bounds
 
-        # Find potential nearby edges
-        nearby_edges = idx.intersect(home_box)
+            # Find potential nearby edges
+            nearby_edges = idx.intersect(home_box)
 
-        nearest_edge = None
-        min_distance = float('inf')
+            nearest_edge = None
+            min_distance = float('inf')
 
-        for u, v, key in nearby_edges:
-            edge_geom = G.edges[u, v, key]['geometry']
-            edge_coords = list(edge_geom.coords)
-            
-            # Calculate distances to all points on the edge
-            distances = [geodesic((home.cord[1], home.cord[0]), (y, x)).meters for x, y in edge_coords]
-            
-            min_edge_distance = min(distances)
-            
-            if min_edge_distance < min_distance:
-                min_distance = min_edge_distance
-                nearest_edge = (u, v, key)
+            for u, v, key in nearby_edges:
+                edge_geom = G.edges[u, v, key]['geometry']
+                edge_coords = list(edge_geom.coords)
 
-        mapped_homes.append((home, nearest_edge))
-        if nearest_edge is None:
-            logger.warning(f"No nearby edge found for home at {home.cord}")
+                # Calculate distances to all points on the edge
+                distances = [geodesic((home.cord[1], home.cord[0]), (y, x)).meters for x, y in edge_coords]
+
+                min_edge_distance = min(distances)
+
+                if min_edge_distance < min_distance:
+                    min_distance = min_edge_distance
+                    nearest_edge = (u, v, key)
+
+            mapped_homes.append((home, nearest_edge))
+            if nearest_edge is None:
+                logger.warning(f"No nearby edge found for home at {home.cord}")
 
     logger.info(f"Successfully mapped {len([h for h, e in mapped_homes if e is not None])} homes to edges")
 

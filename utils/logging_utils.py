@@ -9,6 +9,9 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict
 import inspect
+from contextlib import contextmanager
+
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 
 def add_run_separator(log_file_path: str):
@@ -54,6 +57,26 @@ def setup_logging(log_file_path: str, log_config_path: str) -> None:
     )
     
     logging.info(f"Logging initialized. Check {log_file_path} for logs.")
+
+@contextmanager
+def progress_logging():
+    """
+    Route console log messages through tqdm so they do not break progress bars.
+
+    tqdm's logging_redirect_tqdm replaces the console handler without copying its level,
+    which would print every INFO message; the original console level is restored here.
+    """
+    root = logging.getLogger()
+    console_levels = [
+        h.level for h in root.handlers
+        if type(h) is logging.StreamHandler  # console handlers, not FileHandler
+    ]
+    with logging_redirect_tqdm():
+        if console_levels:
+            for handler in root.handlers:
+                if type(handler).__name__ == "_TqdmLoggingHandler":
+                    handler.setLevel(min(console_levels))
+        yield
 
 class LogManager:
     _instance = None

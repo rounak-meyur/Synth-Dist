@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set, Union, Any
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
+import shapely.wkt as wkt
 import networkx as nx
 from geopy.distance import geodesic
 import pandas as pd
@@ -16,7 +17,10 @@ if __name__ == "__main__":
 
 from utils.logging_utils import LogManager
 from utils.dataloader import Home
-from models.secnet import create_candidate_network, create_secondary_distribution_network
+from models.secnet import create_candidate_network, create_secondary_distribution_network, minimum_transformers
+from models.secnet_heuristic import create_secondary_distribution_network_heuristic
+
+SECNET_METHODS = ("milp", "heuristic")
 
 if __name__ == "__main__":
     LogManager.initialize(
@@ -25,6 +29,34 @@ if __name__ == "__main__":
     )
 
 logger = LogManager.get_logger("secnet_utils")
+
+def get_road_link_geometry(road_network: nx.MultiGraph, road_link: Tuple) -> LineString:
+    """
+    Get the geometry of a road link oriented to start at its first node.
+
+    The road network is undirected, so a stored geometry may run from v to u. The
+    secondary network places transformers along the geometry and records them in the
+    order u -> T... -> v, so the geometry must start at u.
+
+    Args:
+        road_network (nx.MultiGraph): Road network with node attributes 'x' and 'y'
+        road_link (Tuple): Road link (u, v, key)
+
+    Returns:
+        LineString: Geometry of the road link starting at u
+
+    Raises:
+        KeyError: If the road link or its geometry does not exist
+    """
+    geometry = road_network.edges[road_link]['geometry']
+    if geometry is None:
+        raise KeyError(f"Road link {road_link} has no geometry")
+    u = road_link[0]
+    start = Point(road_network.nodes[u]['x'], road_network.nodes[u]['y'])
+    coords = list(geometry.coords)
+    if start.distance(Point(coords[-1])) < start.distance(Point(coords[0])):
+        return LineString(coords[::-1])
+    return geometry
 
 @dataclass
 class Transformer:
@@ -140,7 +172,11 @@ class SecondaryNetworkGenerator:
                 penalty (Optional[float]): Edge crossing penalty
                 max_rating (Optional[float]): Maximum transformer rating
                 max_hops (Optional[int]): Maximum hops from transformer
-            
+                method (Optional[str]): "milp" (default) or "heuristic"
+                parameters (Optional[dict]): Parameters for the selected method
+                    milp: solver, verbose, time_limit, warm_start, relative_gap
+                    heuristic: max_iterations, local_search
+
         Returns:
             nx.Graph: Generated secondary network
         """
@@ -150,24 +186,37 @@ class SecondaryNetworkGenerator:
         penalty = kwargs.get("penalty", 0.5)
         max_rating = kwargs.get("max_rating", 25e3)
         max_hops = kwargs.get("max_hops", 10)
-        solver = kwargs.get("solver", "scip")
-        solver_params = kwargs.get("solver_parameters", {})
+        method = str(kwargs.get("method", "milp")).lower()
+        parameters = kwargs.get("parameters") or {}
+
+        if method not in SECNET_METHODS:
+            raise ValueError(f"Unknown secondary network method '{method}'. Choose from {SECNET_METHODS}.")
+
+        # Enough candidate transformers to serve all homes even on short, crowded road links.
+        # When more than one transformer is needed, one spare candidate leaves the solver room
+        # to find a packing of the home loads that respects max_rating.
+        required_transformers = minimum_transformers([home.load for home in mapped_homes], max_rating)
+        min_transformers = required_transformers + 1 if required_transformers > 1 else 1
 
         # Generate candidate network
         graph, road_nodes = create_candidate_network(
             road_link, road_geom,mapped_homes,
             nearest_homes=nearest_homes,
             minimum_separation=minimum_separation,
+            min_transformers=min_transformers,
             )
         
         # Generate secondary network
-        result = create_secondary_distribution_network(
+        create_network = (
+            create_secondary_distribution_network_heuristic if method == "heuristic"
+            else create_secondary_distribution_network
+        )
+        result = create_network(
             graph=graph,
             penalty=penalty,
             max_rating=max_rating,
             max_hops=max_hops,
-            solver=solver,
-            **solver_params
+            **parameters
         )
         
         # Process and save results
@@ -352,6 +401,80 @@ class SecondaryNetworkGenerator:
         """
         self._session_files.clear()
 
+    def _result_files(self, prefix: str) -> Dict[str, Path]:
+        return {
+            'transformers': self.output_dir / f"{prefix}_transformers.csv",
+            'edges': self.output_dir / f"{prefix}_secondary_edges.csv",
+            'sequence': self.output_dir / f"{prefix}_road_transformer_edges.txt",
+            'combined_nodes': self.output_dir / f"{prefix}_combined_network_nodes.csv",
+            'combined_edges': self.output_dir / f"{prefix}_combined_network_edges.csv",
+        }
+
+    def clear_results(self, prefix: str) -> None:
+        """Delete all secondary network outputs for a prefix and start a new session."""
+        for path in self._result_files(prefix).values():
+            path.unlink(missing_ok=True)
+        self.reset_session()
+
+    def resume(self, prefix: str) -> Set[Tuple[int, int, int]]:
+        """
+        Resume an interrupted run from the per-link results saved by `save_results`.
+
+        A road link counts as finished once its line in the road transformer sequence file
+        is complete (that file is written last). Rows that an interrupted link wrote to the
+        transformer or secondary edge files are dropped, the transformer ID counter continues
+        after the highest saved ID, and later saves append to the existing files.
+
+        Args:
+            prefix (str): Prefix of the output files
+
+        Returns:
+            Set[Tuple[int, int, int]]: Road links (start_node, end_node, edge_key) already finished
+        """
+        files = self._result_files(prefix)
+        for name in ('combined_nodes', 'combined_edges'):
+            files[name].unlink(missing_ok=True)  # rebuilt by combine_networks
+        if not files['sequence'].exists():
+            self.clear_results(prefix)
+            return set()
+
+        completed: Dict[Tuple[int, int, int], List[str]] = {}
+        valid_lines = []
+        for line in files['sequence'].read_text().splitlines(keepends=True):
+            parts = line.split()
+            if not line.endswith('\n') or len(parts) < 5:
+                continue  # partially written line
+            try:
+                road_link = (int(parts[0]), int(parts[1]), int(parts[2]))
+            except ValueError:
+                continue
+            completed[road_link] = parts[3:]
+            valid_lines.append(line)
+        files['sequence'].write_text(''.join(valid_lines))
+
+        transformer_ids = {n for nodes in completed.values() for n in nodes if n.startswith('T')}
+        if files['transformers'].exists():
+            df = pd.read_csv(files['transformers'], dtype={'transformer_id': str})
+            df[df['transformer_id'].isin(transformer_ids)].to_csv(files['transformers'], index=False)
+        if files['edges'].exists():
+            df = pd.read_csv(files['edges'], dtype={'from_node': str, 'to_node': str})
+            done = [
+                (int(u), int(v), int(k)) in completed
+                for u, v, k in zip(df['road_start'], df['road_end'], df['road_edge_key'])
+            ]
+            df[done].to_csv(files['edges'], index=False)
+
+        if transformer_ids:
+            self._next_transformer_id = max(
+                self._next_transformer_id, max(int(t[1:]) for t in transformer_ids) + 1
+            )
+        self.reset_session()
+        self._session_files.update(
+            files[name] for name in ('transformers', 'edges', 'sequence') if files[name].exists()
+        )
+        logger.info(f"Resuming secondary network generation: {len(completed)} road links already finished")
+        return set(completed)
+
     def combine_networks(
         self,
         road_network: nx.MultiGraph,
@@ -468,7 +591,7 @@ class SecondaryNetworkGenerator:
         # Save the combined network
         self.save_combined_network(connected_new_graph, prefix)
         
-        return new_graph
+        return connected_new_graph
     
     def connect_network_components(self, graph: nx.MultiGraph) -> nx.MultiGraph:
         """
@@ -650,48 +773,34 @@ def load_combined_network(
     graph = nx.MultiGraph()
     
     # Load nodes
-    df_nodes = pd.read_csv(nodes_file)
+    # Read IDs as strings so road (int) and transformer ('T...') IDs are parsed the same way
+    df_nodes = pd.read_csv(nodes_file, dtype={'node_id': str})
     for _, row in df_nodes.iterrows():
-        node_id = row['node_id']
-        # Convert node_id to proper type (int for road nodes, str for transformers)
-        if isinstance(node_id, str) and not node_id.startswith('T'):
-            node_id = int(node_id)
+        node_id = _parse_node_id(row['node_id'])
         
-        # Create standardized node attributes
+        # Create standardized node attributes (same as combine_networks)
         node_attrs = {
-            'cord': (row['longitude'], row['latitude']),
-            'load': row['load'],
+            'cord': (float(row['longitude']), float(row['latitude'])),
+            'load': float(row['load']),
             'label': row['label']  # 'R' for road nodes, 'T' for transformer nodes
         }
+        if node_attrs['label'] == 'R':
+            node_attrs['x'], node_attrs['y'] = node_attrs['cord']
         
         graph.add_node(node_id, **node_attrs)
     
     # Load edges
-    df_edges = pd.read_csv(edges_file)
+    df_edges = pd.read_csv(edges_file, dtype={'from_node': str, 'to_node': str})
     for _, row in df_edges.iterrows():
         # Convert node IDs to proper type
-        from_node = row['from_node']
-        to_node = row['to_node']
-        key = row['key']
+        from_node = _parse_node_id(row['from_node'])
+        to_node = _parse_node_id(row['to_node'])
+        key = int(row['key'])
         
-        # Convert road node IDs to int
-        if isinstance(from_node, str) and not from_node.startswith('T'):
-            from_node = int(from_node)
-        if isinstance(to_node, str) and not to_node.startswith('T'):
-            to_node = int(to_node)
-        
-        # Handle geometry conversion from string to LineString
+        # Handle geometry conversion from WKT string to LineString
         geometry_str = row['geometry']
-        if isinstance(geometry_str, str):
-            # Parse the geometry string
-            # Example format: "LINESTRING (lon1 lat1, lon2 lat2)"
-            coords_str = geometry_str.replace('LINESTRING (', '').replace(')', '')
-            coords_pairs = coords_str.split(', ')
-            coords = [
-                tuple(map(float, pair.split())) 
-                for pair in coords_pairs
-            ]
-            geometry = LineString(coords)
+        if isinstance(geometry_str, str) and geometry_str not in ('', 'None'):
+            geometry = wkt.loads(geometry_str)
         else:
             # If geometry is missing, create from node coordinates
             from_cord = graph.nodes[from_node]['cord']
@@ -707,11 +816,15 @@ def load_combined_network(
             to_node,
             key=key,
             geometry=geometry,
-            highway=row['highway'],
-            length=row['length']
+            highway=row['highway'] if isinstance(row['highway'], str) else 'unclassified',
+            length=float(row['length'])
         )
     
     return graph
+
+def _parse_node_id(node_id: str) -> Union[int, str]:
+    """Road node IDs are integers, transformer IDs are strings starting with 'T'."""
+    return node_id if node_id.startswith('T') else int(node_id)
 
 def _get_node_coord(
     graph: nx.MultiGraph,
