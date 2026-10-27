@@ -10,6 +10,5 @@ ADD models /home/models
 ADD utils /home/utils
 ADD configs /home/configs
 COPY main.py /home/
-COPY main_secnet.py /home/
 
 WORKDIR /home/
