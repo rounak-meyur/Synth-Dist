@@ -9,7 +9,10 @@ miscellaneous:
   log_dir: "logs/"
   intermediate_dir: "out/interim/"
   mapping_dir: "out/mapping/"
+  stats_dir: "out/stats/"
   padding: 0.001
+  # Ignore saved outputs and rerun every stage (same as the --from-scratch flag)
+  from_scratch: false
 
 secnet:
   out_dir: "out/secnet/"
@@ -18,8 +21,10 @@ secnet:
     penalty: 0.5
     max_rating: 25000
     max_hops: 10
-    solver: scip
-    solver_parameters:
+    # cvxpy MILP solved with SCIP/Gurobi (see configs/config_heuristic.yaml for the heuristic)
+    method: milp
+    parameters:
+      solver: scip
       verbose: true
       time_limit: 600
       warm_start: true
@@ -36,11 +41,17 @@ primnet:
     maximum_branch_flow: 400
     max_feeder_number: 10
     max_feeder_capacity: 400
-    solver: scip
-    relative_gap: 0.05
-    verbose: true
-    warm_start: true
-    threads: 0
+    # cvxpy MILP solved with SCIP (see configs/config_heuristic.yaml for the heuristic)
+    method: milp
+    parameters:
+      solver: scip
+      relative_gap: 0.05
+      verbose: true
+      warm_start: true
+      threads: 0
+
+finalnet:
+  out_dir: "out/finalnet/"
 
 figures:
   directory: "figs"
