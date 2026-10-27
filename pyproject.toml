@@ -1,0 +1,43 @@
+[project]
+name = "synth-dist"
+version = "0.1.0"
+description = "Synthetic power distribution network generation from homes and OpenStreetMap roads"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "cvxpy",
+    "geopandas",
+    "geopy",
+    "matplotlib",
+    "networkx",
+    "numpy",
+    "omegaconf",
+    "osmnx",
+    "pandas",
+    "pyqtree",
+    "pyscipopt",
+    "requests",
+    "scipy",
+    "shapely",
+    "tqdm",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-cov",
+]
+
+[tool.uv]
+# The repo is a set of scripts (main.py, utils/, models/), not an installable package.
+package = false
+# Avoid picking up a system/conda interpreter of the wrong architecture (e.g. x86 conda on Apple Silicon).
+python-preference = "managed"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+    "integration: tests that need locally cached region data (skipped when absent)",
+]
