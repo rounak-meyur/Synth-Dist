@@ -1,0 +1,36 @@
+stages:
+  - test
+
+variables:
+  UV_VERSION: "0.11.3"
+  PYTHON_VERSION: "3.12"
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+  UV_LINK_MODE: copy
+  # Use the image's interpreter instead of downloading a managed one
+  UV_PYTHON_PREFERENCE: only-system
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+pytest:
+  stage: test
+  image: ghcr.io/astral-sh/uv:$UV_VERSION-python$PYTHON_VERSION-bookworm-slim
+  cache:
+    key:
+      files:
+        - uv.lock
+    paths:
+      - $UV_CACHE_DIR
+  script:
+    - uv sync --locked
+    - uv run pytest --junitxml=report.xml
+  after_script:
+    - uv cache prune --ci
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
