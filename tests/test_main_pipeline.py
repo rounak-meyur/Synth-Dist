@@ -1,7 +1,8 @@
 """
 End-to-end check of main.py: config + logging, home loading, road loading/caching,
 home-to-road mapping, secondary network generation and transformer partitioning,
-including checkpointing (reuse, invalidation, resume and --from-scratch).
+including checkpointing (reuse, invalidation, resume and --from-scratch), groups of
+several regions and running the stages as separate jobs.
 
 OpenStreetMap is replaced by a synthetic road grid, and every output goes to tmp_path.
 """
@@ -19,6 +20,8 @@ from utils import osm_utils, secnet_utils
 
 REGION = "777"
 SUBSTATION_ID = "4242"
+REGION_STAGES = ["roads", "mapping", "secnet"]
+GROUP_STAGES = ["partition", "primnet", "finalnet"]
 STAGE_LOGS = {
     "roads": "Reusing saved road network",
     "mapping": "Reusing saved home to road mapping",
@@ -37,10 +40,11 @@ def road_grid():
 
 
 class Pipeline:
-    """main.py configured to read and write everything below `base`."""
+    """main.py configured to read and write everything below `base`, for a group of one region."""
 
-    def __init__(self, base, homes, monkeypatch):
+    def __init__(self, base, homes, monkeypatch, group=REGION, regions=None):
         self.base, self.monkeypatch = base, monkeypatch
+        regions = regions or {REGION: homes}
         self.conf = OmegaConf.load(REPO_ROOT / "configs/config_heuristic.yaml")
         # main.py builds paths by string concatenation, so directories need a trailing slash
         self.conf.inputs.home_csv_dir = f"{base}/data/load/"
@@ -54,10 +58,15 @@ class Pipeline:
         self.conf.finalnet.out_dir = f"{base}/out/finalnet/"
         self.conf.figures.directory = f"{base}/figs"
 
-        write_homes_csv(base / f"data/load/{REGION}-home-load.csv", homes)
+        base.mkdir(parents=True, exist_ok=True)
+        self.group_file = base / "group.yaml"
+        OmegaConf.save(OmegaConf.create({"state": 51, "group": {"name": group, "regions": list(regions)}}), self.group_file)
+        for region, region_homes in regions.items():
+            write_homes_csv(base / f"data/load/{region}-home-load.csv", region_homes)
         # one substation inside the convex hull of the homes
-        lon = sum(h.cord[0] for h in homes) / len(homes)
-        lat = sum(h.cord[1] for h in homes) / len(homes)
+        all_homes = [h for region_homes in regions.values() for h in region_homes]
+        lon = sum(h.cord[0] for h in all_homes) / len(all_homes)
+        lat = sum(h.cord[1] for h in all_homes) / len(all_homes)
         (base / "substations.csv").write_text(f"ID,X,Y\n{SUBSTATION_ID},{lon},{lat}\n")
 
         self.out = {
@@ -67,27 +76,36 @@ class Pipeline:
             "transformers": base / f"out/secnet/{REGION}_transformers.csv",
             "secnet_edges": base / f"out/secnet/{REGION}_combined_network_edges.csv",
             "secnet_nodes": base / f"out/secnet/{REGION}_combined_network_nodes.csv",
-            "assignment": base / f"out/interim/{REGION}_transformer_assignment.json",
-            "primnet_nodes": base / f"out/primnet/{REGION}_{SUBSTATION_ID}_nodes.csv",
-            "primnet_edges": base / f"out/primnet/{REGION}_{SUBSTATION_ID}_edges.csv",
-            "final_nodes": base / f"out/finalnet/{REGION}_distribution_network_nodes.csv",
-            "final_edges": base / f"out/finalnet/{REGION}_distribution_network_edges.csv",
+            "assignment": base / f"out/interim/{group}_partition/{SUBSTATION_ID}.json",
+            "substation_list": base / f"out/interim/{group}_partition/substations.txt",
+            "primnet_nodes": base / f"out/primnet/{group}_{SUBSTATION_ID}_nodes.csv",
+            "primnet_edges": base / f"out/primnet/{group}_{SUBSTATION_ID}_edges.csv",
+            "final_nodes": base / f"out/finalnet/{group}_distribution_network_nodes.csv",
+            "final_edges": base / f"out/finalnet/{group}_distribution_network_edges.csv",
             "checkpoints": base / f"out/interim/{REGION}_checkpoints.json",
+            "group_checkpoints": base / f"out/interim/{group}_group_checkpoints.json",
+            "primnet_checkpoints": base / f"out/interim/{group}_primnet/{SUBSTATION_ID}_checkpoints.json",
             "stats": base / f"out/stats/{REGION}_run_stats.json",
-            "log": base / f"logs/application_{REGION}.log",
+            "group_stats": base / f"out/stats/{group}_group_run_stats.json",
+            "primnet_stats": base / f"out/stats/{group}_primnet/{SUBSTATION_ID}_run_stats.json",
+            "log": base / f"logs/application_{group}.log",
         }
 
-    def run(self, osm_mock, *extra_args):
+    def run(self, osm_mock, *args):
+        """Run main.py with `args` (stage first, if any); returns the log of this run."""
         config_path = self.base / "config.yaml"
         OmegaConf.save(self.conf, config_path)
         # main.py reads configs/logging_config.ini relative to the working directory
         self.monkeypatch.chdir(REPO_ROOT)
-        self.monkeypatch.setattr(sys, "argv", ["main.py", "-c", str(config_path), "-r", REGION, *extra_args])
+        self.monkeypatch.setattr(
+            sys, "argv", ["main.py", *args, "-c", str(config_path), "-g", str(self.group_file)]
+        )
         self.monkeypatch.setattr(osm_utils.ox, "graph_from_polygon", osm_mock)
-        log = self.out["log"]
-        start = len(log.read_text()) if log.exists() else 0
+        # every stage and task writes its own log file
+        logs = self.base / "logs"
+        before = {p: len(p.read_text()) for p in logs.glob("*.log")} if logs.exists() else {}
         main_module.main()
-        return log.read_text()[start:]  # log of this run only
+        return "".join(p.read_text()[before.get(p, 0):] for p in sorted(logs.glob("*.log")))
 
     def snapshot(self, *names):
         return {name: self.out[name].read_text() for name in names}
@@ -128,18 +146,24 @@ def test_main_first_run_creates_outputs(pipeline, road_grid, homes):
     assert "Transformer partitioning and partition data loading complete" in log
 
     # every transformer of the combined network is assigned to the single substation
-    from utils.partition_utils import load_partitioning
+    from utils.partition_utils import load_substation_partition
     from utils.secnet_utils import load_combined_network
     combined = load_combined_network(str(out["secnet_nodes"]), str(out["secnet_edges"]))
     transformers = {str(n) for n, d in combined.nodes(data=True) if d["label"] == "T"}
-    partition = load_partitioning(str(out["assignment"]))
-    assert list(partition) == [int(SUBSTATION_ID)]
+    assert out["substation_list"].read_text().split() == [SUBSTATION_ID]
+    sub, partition = load_substation_partition(str(out["assignment"].parent), SUBSTATION_ID)
+    assert sub.id == SUBSTATION_ID
     assert transformers
-    assert transformers <= set(partition[int(SUBSTATION_ID)]["nodelist"])
+    assert transformers <= set(partition["nodelist"])
 
-    stages = json.loads(out["checkpoints"].read_text())["stages"]
-    assert list(stages) == ["roads", "mapping", "secnet", "partition", "primnet", "finalnet"]
-    assert all(s["status"] == "complete" for s in stages.values())
+    for name, expected in (
+        ("checkpoints", ["roads", "mapping", "secnet"]),
+        ("group_checkpoints", ["partition", "finalnet"]),
+        ("primnet_checkpoints", ["primnet"]),
+    ):
+        stages = json.loads(out[name].read_text())["stages"]
+        assert list(stages) == expected
+        assert all(s["status"] == "complete" for s in stages.values())
 
 
 def test_main_missing_home_csv(pipeline, road_grid):
@@ -179,7 +203,7 @@ def test_main_partition_failure_raises_original_error(pipeline, road_grid):
     # a 4 x 4 grid is too small: NetworkPartitioner drops cells with <= 100 nodes
     with pytest.raises(ValueError, match="No valid centers"):
         pipeline.run(MagicMock(return_value=make_road_grid(4)))
-    stages = json.loads(pipeline.out["checkpoints"].read_text())["stages"]
+    stages = json.loads(pipeline.out["group_checkpoints"].read_text())["stages"]
     assert stages["partition"]["status"] == "in_progress"
 
 
@@ -221,14 +245,16 @@ def test_main_from_scratch_reruns_every_stage(pipeline, road_grid, use_flag):
     assert pipeline.snapshot(*ALL_OUTPUTS) == before, "recomputing must reproduce the same outputs"
 
 
-def test_main_changed_secnet_parameters_rerun_secnet_and_partition(pipeline, road_grid):
+def test_main_changed_secnet_parameters_rerun_secnet(pipeline, road_grid):
     pipeline.run(MagicMock(return_value=road_grid))
     before = pipeline.snapshot("edges", "nodes", "h2r")
 
     pipeline.conf.secnet.secnet_args.max_hops = 1
     log = pipeline.run(no_osm())
 
-    assert reused_stages(log) == {"roads", "mapping"}
+    # one home per road link: the secondary network is the same, so the group stages are reused
+    assert reused_stages(log) == {"roads", "mapping", "partition", "primnet", "finalnet"}
+    assert read_stats(pipeline)["stages"]["secnet"]["road_links_generated"] > 0
     assert pipeline.snapshot("edges", "nodes", "h2r") == before
 
 
@@ -257,7 +283,8 @@ def test_main_changed_substations_rerun_partition_only(pipeline, road_grid):
 
     log = pipeline.run(no_osm())
     assert reused_stages(log) == {"roads", "mapping", "secnet"}
-    assert list(json.loads(pipeline.out["assignment"].read_text())) == ["5353"]
+    assert pipeline.out["substation_list"].read_text().split() == ["5353"]
+    assert not pipeline.out["assignment"].exists()
     assert (pipeline.base / f"out/primnet/{REGION}_5353_edges.csv").exists()
     assert not pipeline.out["primnet_edges"].exists(), "outputs of the old substation are removed"
 
@@ -266,8 +293,25 @@ def test_main_missing_output_reruns_that_stage(pipeline, road_grid):
     pipeline.run(MagicMock(return_value=road_grid))
     pipeline.out["h2r"].unlink()
     log = pipeline.run(no_osm())
-    assert reused_stages(log) == {"roads"}
+    # the region's later stages are rerun; the group stages see identical inputs and are reused
+    assert reused_stages(log) == {"roads", "partition", "primnet", "finalnet"}
     assert pipeline.out["h2r"].exists()
+
+
+def test_main_group_stages_rerun_when_their_inputs_change(pipeline, road_grid):
+    pipeline.run(MagicMock(return_value=road_grid))
+    edges = pipeline.out["secnet_edges"]
+    edges.write_text(edges.read_text().replace("residential", "tertiary"))
+    log = pipeline.run(no_osm())
+    reused = reused_stages(log)
+    assert {"roads", "mapping", "secnet"} <= reused
+    assert "partition" not in reused, "the partition reads the changed combined network"
+
+    pipeline.out["primnet_checkpoints"].unlink()
+    log = pipeline.run(no_osm())
+    assert reused_stages(log) == {"roads", "mapping", "secnet", "partition", "finalnet"}, (
+        "the primary network is regenerated; it is identical, so the final network is reused"
+    )
 
 
 def test_main_outputs_without_checkpoints_are_regenerated(pipeline, road_grid):
@@ -281,7 +325,8 @@ def test_main_outputs_without_checkpoints_are_regenerated(pipeline, road_grid):
 
     log = pipeline.run(no_osm())
     assert "Adopting existing outputs of stage 'roads'" in log
-    assert reused_stages(log) == {"roads"}
+    # the regenerated combined network is the one the saved partition was made from
+    assert reused_stages(log) == {"roads", "partition", "primnet", "finalnet"}
     assert pipeline.out["secnet_nodes"].read_text() != "stale\n"
 
 
@@ -363,19 +408,22 @@ def test_main_does_not_resume_with_changed_parameters(pipeline, road_grid, monke
 
 # Run statistics
 
-def read_stats(pipeline):
-    return json.loads(pipeline.out["stats"].read_text())
+def read_stats(pipeline, name="stats"):
+    return json.loads(pipeline.out[name].read_text())
 
 
 def test_main_writes_run_statistics(pipeline, road_grid, homes):
     pipeline.run(MagicMock(return_value=road_grid))
-    stats = read_stats(pipeline)
+    region_stats, group_stats = read_stats(pipeline), read_stats(pipeline, "group_stats")
 
-    assert stats["status"] == "complete"
-    assert stats["region"] == REGION and stats["secnet_method"] == "heuristic"
-    assert stats["total_seconds"] >= sum(s["seconds"] for s in stats["stages"].values()) - 1e-3
-    assert list(stats["stages"]) == ["roads", "mapping", "secnet", "partition", "primnet", "finalnet"]
-    assert all(s["status"] == "computed" for s in stats["stages"].values())
+    for stats, stages in ((region_stats, REGION_STAGES), (group_stats, GROUP_STAGES)):
+        assert stats["status"] == "complete"
+        assert stats["total_seconds"] >= sum(s["seconds"] for s in stats["stages"].values()) - 1e-3
+        assert list(stats["stages"]) == stages
+        assert all(s["status"] == "computed" for s in stats["stages"].values())
+    assert region_stats["region"] == REGION and region_stats["secnet_method"] == "heuristic"
+    assert group_stats["group"] == REGION and group_stats["regions"] == [REGION]
+    stats = {**group_stats, "stages": {**region_stats["stages"], **group_stats["stages"]}}
 
     roads, mapping = stats["stages"]["roads"], stats["stages"]["mapping"]
     assert roads["homes"] == len(homes)
@@ -404,9 +452,11 @@ def test_main_writes_run_statistics(pipeline, road_grid, homes):
 
 def test_main_statistics_mark_reused_stages(pipeline, road_grid):
     pipeline.run(MagicMock(return_value=road_grid))
-    first = read_stats(pipeline)
+    first = {name: read_stats(pipeline, name) for name in ("stats", "group_stats", "primnet_stats")}
     pipeline.run(no_osm())
-    second = read_stats(pipeline)
+    second = {name: read_stats(pipeline, name) for name in ("stats", "group_stats", "primnet_stats")}
+    first = {"stages": {f"{n}/{k}": v for n, st in first.items() for k, v in st["stages"].items()}}
+    second = {"stages": {f"{n}/{k}": v for n, st in second.items() for k, v in st["stages"].items()}}
 
     assert all(s["status"] == "reused" for s in second["stages"].values())
     # data sizes are computed from the saved outputs, so they match the first run
@@ -430,11 +480,13 @@ def test_main_statistics_mark_reused_stages(pipeline, road_grid):
 def test_main_statistics_record_failure(pipeline):
     with pytest.raises(ValueError):
         pipeline.run(MagicMock(return_value=make_road_grid(4)))
-    stats = read_stats(pipeline)
+    stats = read_stats(pipeline, "group_stats")
     assert stats["status"] == "failed" and stats["failed_stage"] == "partition"
     assert stats["stages"]["partition"]["status"] == "failed"
     assert "No valid centers" in stats["stages"]["partition"]["error"]
-    assert stats["stages"]["secnet"]["status"] == "computed"
+    region_stats = read_stats(pipeline)
+    assert region_stats["status"] == "complete"
+    assert region_stats["stages"]["secnet"]["status"] == "computed"
 
 
 
@@ -456,7 +508,10 @@ def test_main_changed_primnet_parameters_rerun_primnet_only(pipeline, road_grid)
     pipeline.run(MagicMock(return_value=road_grid))
     pipeline.conf.primnet.primnet_args.maximum_branch_flow = 300
     log = pipeline.run(no_osm())
-    assert reused_stages(log) == {"roads", "mapping", "secnet", "partition"}
+    reused = reused_stages(log)
+    assert {"roads", "mapping", "secnet", "partition"} <= reused
+    assert "primnet" not in reused
+    assert read_stats(pipeline, "primnet_stats")["stages"]["primnet"]["status"] == "computed"
 
 
 def test_main_resumes_interrupted_primnet_stage(pipeline, road_grid, monkeypatch):
@@ -466,13 +521,14 @@ def test_main_resumes_interrupted_primnet_stage(pipeline, road_grid, monkeypatch
         m.setattr(primnet_utils.PrimaryNetworkGenerator, "export_to_csv", MagicMock(side_effect=KeyboardInterrupt))
         with pytest.raises(KeyboardInterrupt):
             pipeline.run(MagicMock(return_value=road_grid))
-    assert json.loads(pipeline.out["checkpoints"].read_text())["stages"]["primnet"]["status"] == "in_progress"
+    stages = json.loads(pipeline.out["primnet_checkpoints"].read_text())["stages"]
+    assert stages["primnet"]["status"] == "in_progress"
 
     log = pipeline.run(no_osm())
     assert reused_stages(log) == {"roads", "mapping", "secnet", "partition"}
     assert pipeline.out["final_edges"].exists()
-    primnet = json.loads(pipeline.out["stats"].read_text())["stages"]["primnet"]
-    assert primnet["status"] == "resumed" and primnet["substations_generated"] == 1
+    primnet = read_stats(pipeline, "group_stats")["stages"]["primnet"]
+    assert primnet["status"] == "computed" and primnet["substations_generated"] == 1
     assert pipeline.out["primnet_edges"].exists()
 
 
@@ -490,7 +546,7 @@ def test_main_final_network_connects_every_home(pipeline, road_grid, homes):
     assert {str(h.id) for h in homes} <= set(network.nodes)
     assert {d["label"] for _, _, d in network.edges(data=True)} == {"feeder", "primary", "secondary"}
 
-    final = json.loads(pipeline.out["stats"].read_text())["stages"]["finalnet"]
+    final = read_stats(pipeline, "group_stats")["stages"]["finalnet"]
     assert final["is_forest"] and final["trees"] == 1
     assert final["homes_missing"] == 0 and final["trees_without_substation"] == 0
     assert final["nodes_by_label"]["H"] == len(homes)
@@ -501,3 +557,153 @@ def test_main_plot_saved_in_figures_directory(pipeline, road_grid):
     figdir = pipeline.base / "figs"
     assert (figdir / f"{REGION}_distribution_network.png").exists()
     assert (figdir / f"{REGION}_combined_network.png").exists()
+
+
+# Groups of several regions
+
+GROUP = "pair"
+OTHER_REGION = "778"
+
+
+@pytest.fixture
+def pair_regions(homes):
+    """Two regions on the same road grid: the second region's homes are 6 columns to the east."""
+    from conftest import GRID_STEP
+    from utils.dataloader import Home
+    shifted = [
+        Home(id=h.id + 1000, cord=(h.cord[0] + 6 * GRID_STEP, h.cord[1]), profile=h.profile, peak=h.peak, load=h.load)
+        for h in homes
+    ]
+    return {REGION: homes, OTHER_REGION: shifted}
+
+
+def pair_pipeline(base, pair_regions, monkeypatch):
+    return Pipeline(base, None, monkeypatch, group=GROUP, regions=pair_regions)
+
+
+@pytest.fixture
+def pair(tmp_path, pair_regions, monkeypatch, restore_logging):
+    return pair_pipeline(tmp_path, pair_regions, monkeypatch)
+
+
+def run_stages_as_jobs(pipeline, road_grid):
+    """The jobs of scripts/slurm/submit.sh, one after the other; returns their logs."""
+    log = ""
+    for task in range(2):
+        log += pipeline.run(MagicMock(return_value=road_grid), "secnet", "--task-index", str(task), "--task-count", "2")
+    log += pipeline.run(no_osm(), "partition")
+    for task in range(3):  # more tasks than substations: the extra tasks have nothing to do
+        log += pipeline.run(no_osm(), "primnet", "--task-index", str(task), "--task-count", "3")
+    return log + pipeline.run(no_osm(), "finalnet")
+
+
+def test_main_group_combines_all_regions(pair, road_grid, pair_regions):
+    pair.run(MagicMock(return_value=road_grid))
+    from utils.finalnet_utils import load_distribution_network
+    network = load_distribution_network(pair.out["final_nodes"], pair.out["final_edges"])
+
+    assert nx.is_tree(network), "one substation serves the homes of both regions"
+    all_homes = [h for region_homes in pair_regions.values() for h in region_homes]
+    assert {str(h.id) for h in all_homes} <= set(network.nodes)
+    for region in pair_regions:
+        assert (pair.base / f"out/stats/{region}_run_stats.json").exists()
+    final = read_stats(pair, "group_stats")["stages"]["finalnet"]
+    assert final["homes_missing"] == 0 and final["nodes_by_label"]["H"] == len(all_homes)
+
+
+def test_main_group_merge_drops_plain_copies_of_replaced_road_links(pair, road_grid):
+    """A road link with transformers of one region is a plain road edge in the other region's network."""
+    pair.run(MagicMock(return_value=road_grid))
+    from utils.secnet_utils import merge_combined_networks
+    secnet_dir = pair.base / "out/secnet"
+    merged = merge_combined_networks([REGION, OTHER_REGION], str(secnet_dir))
+
+    replaced = [
+        tuple(int(x) for x in line.split()[:3])
+        for region in (REGION, OTHER_REGION)
+        for line in (secnet_dir / f"{region}_road_transformer_edges.txt").read_text().splitlines()
+    ]
+    assert len(replaced) == 10
+    for u, v, k in replaced:
+        assert not merged.has_edge(u, v, key=k)
+        assert nx.has_path(merged, u, v), "the road with the transformers on it remains"
+    transformers = [n for n, d in merged.nodes(data=True) if d["label"] == "T"]
+    assert transformers and nx.is_connected(merged)
+
+
+def test_main_stages_as_separate_jobs_match_a_single_run(tmp_path, pair_regions, monkeypatch, restore_logging, road_grid):
+    single = pair_pipeline(tmp_path / "single", pair_regions, monkeypatch)
+    single.run(MagicMock(return_value=road_grid))
+
+    jobs = pair_pipeline(tmp_path / "jobs", pair_regions, monkeypatch)
+    run_stages_as_jobs(jobs, road_grid)
+
+    outputs = ("assignment", "primnet_nodes", "primnet_edges", "final_nodes", "final_edges")
+    assert jobs.snapshot(*outputs) == single.snapshot(*outputs)
+    logs = {p.name for p in (jobs.base / "logs").glob("*.log")}
+    assert {f"application_{GROUP}_secnet_0.log", f"application_{GROUP}_secnet_1.log",
+            f"application_{GROUP}_partition.log", f"application_{GROUP}_finalnet.log"} <= logs
+
+    # the finalnet job keeps the statistics of the partition job
+    stats = read_stats(jobs, "group_stats")
+    assert list(stats["stages"]) == GROUP_STAGES
+    assert stats["stages"]["primnet"]["substations_generated"] == 1
+
+    # running the jobs again reuses everything
+    log = run_stages_as_jobs(jobs, road_grid)
+    assert reused_stages(log) == set(STAGE_LOGS)
+
+
+def test_main_group_stages_need_the_earlier_stages(pair, road_grid):
+    pair.run(MagicMock(return_value=road_grid), "secnet", "-r", REGION)
+    with pytest.raises(RuntimeError, match=f"run the secnet stage for region {OTHER_REGION}"):
+        pair.run(no_osm(), "partition")
+
+    pair.run(MagicMock(return_value=road_grid), "secnet", "-r", OTHER_REGION)
+    with pytest.raises(FileNotFoundError, match="run the partition stage first"):
+        pair.run(no_osm(), "primnet")
+    pair.run(no_osm(), "partition")
+    with pytest.raises(RuntimeError, match="run the primnet stage"):
+        pair.run(no_osm(), "finalnet")
+
+
+def test_main_list_tasks(pair, road_grid, capsys):
+    def listed(*args):
+        capsys.readouterr()
+        pair.run(no_osm(), *args, "--list")
+        return capsys.readouterr().out.split()
+
+    assert listed("secnet") == [REGION, OTHER_REGION]
+    assert listed("secnet", "--task-index", "1", "--task-count", "2") == [OTHER_REGION]
+    assert listed("secnet", "-r", "999") == ["999"]
+
+    pair.run(MagicMock(return_value=road_grid), "secnet")
+    pair.run(no_osm(), "partition")
+    assert listed("primnet") == [SUBSTATION_ID]
+    assert listed("primnet", "--task-index", "1", "--task-count", "2") == []
+
+
+def test_main_regions_option_runs_a_group_of_those_regions(pair, road_grid):
+    """-r replaces the group's regions; group outputs are named after them."""
+    pair.run(MagicMock(return_value=road_grid), "-r", OTHER_REGION, REGION)
+    assert (pair.base / f"out/finalnet/{OTHER_REGION}_{REGION}_distribution_network_edges.csv").exists()
+    assert not pair.out["final_edges"].exists()
+
+    # the substation lies between the two regions, outside the homes of either one
+    with pytest.raises(ValueError, match=f"No substation .* group {REGION}"):
+        pair.run(no_osm(), "-r", REGION)
+
+
+@pytest.mark.parametrize("args", [
+    ["partition", "--task-count", "2", "--task-index", "1"],
+    ["secnet", "--task-count", "2", "--task-index", "2"],
+])
+def test_main_rejects_invalid_task_options(pair, args):
+    with pytest.raises(SystemExit):
+        pair.run(no_osm(), *args)
+
+
+def test_main_requires_state_in_group_config(pair):
+    OmegaConf.save(OmegaConf.create({"group": {"name": GROUP, "regions": [REGION]}}), pair.group_file)
+    with pytest.raises(SystemExit, match="must set the state"):
+        pair.run(no_osm())

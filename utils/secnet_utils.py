@@ -822,6 +822,56 @@ def load_combined_network(
     
     return graph
 
+def merge_combined_networks(
+    regions: List[str],
+    secnet_dir: str
+    ) -> nx.MultiGraph:
+    """
+    Merge the combined road and transformer networks of several regions into one network.
+
+    Road networks of neighbouring regions overlap near their border and share OSM node IDs,
+    so the merged network is connected across regions. A road link that one region replaced
+    by its transformer sequence can still be a plain road edge in a neighbouring region (no
+    homes of that region along it); such plain edges are removed so that only the road with
+    the transformers on it remains.
+
+    Args:
+        regions (List[str]): Regions (prefixes of the secondary network files)
+        secnet_dir (str): Directory with <region>_combined_network_nodes.csv / _edges.csv
+            and <region>_road_transformer_edges.txt
+
+    Returns:
+        nx.MultiGraph: Merged network with the attributes of load_combined_network
+    """
+    merged = nx.MultiGraph()
+    replaced = set()
+    for region in regions:
+        graph = load_combined_network(
+            nodes_file=str(Path(secnet_dir) / f"{region}_combined_network_nodes.csv"),
+            edges_file=str(Path(secnet_dir) / f"{region}_combined_network_edges.csv"),
+        )
+        merged.add_nodes_from(graph.nodes(data=True))
+        # keep the keys so that a road edge present in several regions is added once
+        merged.add_edges_from(graph.edges(keys=True, data=True))
+
+        sequence_file = Path(secnet_dir) / f"{region}_road_transformer_edges.txt"
+        if sequence_file.exists():
+            for line in sequence_file.read_text().splitlines():
+                parts = line.split()
+                if len(parts) >= 4:
+                    replaced.add((int(parts[0]), int(parts[1]), int(parts[2])))
+
+    removed = 0
+    for u, v, k in replaced:
+        if merged.has_edge(u, v, key=k):
+            merged.remove_edge(u, v, key=k)
+            removed += 1
+    logger.info(
+        f"Merged networks of {len(regions)} regions: {merged.number_of_nodes()} nodes, "
+        f"{merged.number_of_edges()} edges ({removed} plain road edges replaced by transformers)"
+    )
+    return merged
+
 def _parse_node_id(node_id: str) -> Union[int, str]:
     """Road node IDs are integers, transformer IDs are strings starting with 'T'."""
     return node_id if node_id.startswith('T') else int(node_id)

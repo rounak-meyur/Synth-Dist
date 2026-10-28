@@ -1,6 +1,3 @@
-state: 51
-region: 999
-
 inputs:
   home_csv_dir: "data/load/"
   substation_csv: "data/substations.csv"

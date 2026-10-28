@@ -57,17 +57,20 @@ def combine_networks(
     region_name: str,
     homes: List[Home],
     prim_dir: str,
-    sec_dir: str
+    sec_dir: str,
+    secondary_regions: List[str] = None
     ) -> nx.Graph:
     """
     Combine primary and secondary distribution networks into a single graph.
 
     Args:
         sub_ids (List[str]): List of service substation IDs
-        region_name (str): Name of the region (prefix of the network files)
+        region_name (str): Name of the region or group of regions (prefix of the network files)
         homes (List[Home]): List of Home objects (coordinates and loads)
         prim_dir (str): Directory with <region>_<substation>_nodes.csv / _edges.csv
         sec_dir (str): Directory with <region>_secondary_edges.csv
+        secondary_regions (List[str]): Regions whose secondary networks are combined
+            (default: [region_name])
 
     Returns:
         nx.Graph: Combined network graph. Node IDs are strings; nodes carry 'cord', 'label'
@@ -109,11 +112,17 @@ def combine_networks(
             )
 
     # Secondary network: homes hang from the transformers of the primary networks
-    secondary_file = Path(sec_dir) / f"{region_name}_secondary_edges.csv"
-    if not secondary_file.exists():
-        raise FileNotFoundError(f"Secondary network file not found: {secondary_file}")
+    secondary_files = [
+        Path(sec_dir) / f"{region}_secondary_edges.csv" for region in (secondary_regions or [region_name])
+    ]
+    for secondary_file in secondary_files:
+        if not secondary_file.exists():
+            raise FileNotFoundError(f"Secondary network file not found: {secondary_file}")
     home_by_id = {str(home.id): home for home in homes}
-    secondary_df = pd.read_csv(secondary_file, dtype={"from_node": str, "to_node": str})
+    secondary_df = pd.concat(
+        [pd.read_csv(f, dtype={"from_node": str, "to_node": str}) for f in secondary_files],
+        ignore_index=True,
+    )
     for _, row in secondary_df.iterrows():
         u, v = row["from_node"], row["to_node"]
         for node in (u, v):

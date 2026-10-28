@@ -1,0 +1,23 @@
+# Group configuration: Northern Virginia, the jurisdictions of the Northern Virginia
+# Regional Commission. Merged over the configuration file (-c), so any setting there
+# can be overridden here.
+#   uv run main.py -g configs/regions/northern_virginia.yaml
+state: 51
+
+inputs:
+  home_csv_dir: "data/load_51/"
+
+group:
+  name: northern_virginia
+  # county FIPS codes (quoted to keep the leading zeros)
+  regions: [
+    "013",  # Arlington County
+    "059",  # Fairfax County
+    "107",  # Loudoun County
+    "153",  # Prince William County
+    "510",  # Alexandria
+    "600",  # Fairfax City
+    "610",  # Falls Church
+    "683",  # Manassas
+    "685",  # Manassas Park
+  ]

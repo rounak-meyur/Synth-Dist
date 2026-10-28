@@ -263,7 +263,28 @@ class NetworkPartitioner:
         # Create output directory if it doesn't exist
         output_path = Path(output_file)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        partitioned_data = self.build_partitioning(assignments, subs)
         
+        # Save to JSON file
+        with open(output_path, 'w') as f:
+            json.dump(partitioned_data, f, indent=2)
+
+    def build_partitioning(
+        self,
+        assignments: Dict[int, List[str]],
+        subs: List[Substation]
+    ) -> Dict[str, Dict]:
+        """
+        Node and edge information of the induced subgraph of every substation's partition.
+        
+        Args:
+            assignments (Dict[int, List[str]]): Mapping of substation IDs to transformer and road node lists
+            substations (List[Substation]): List of substations
+            
+        Returns:
+            Dict[str, Dict]: Mapping of substation ID to {"nodelist": ..., "edgelist": ...}
+                for the substations with assigned nodes
+        """
         # Create structured data for JSON
         partitioned_data = {}
         
@@ -310,9 +331,7 @@ class NetworkPartitioner:
                     "edgelist": edgelist
                 }
         
-        # Save to JSON file
-        with open(output_path, 'w') as f:
-            json.dump(partitioned_data, f, indent=2)
+        return partitioned_data
 
 
 def load_partitioning(
@@ -358,3 +377,67 @@ def load_partitioning(
         
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON format in {input_file}: {str(e)}")
+
+SUBSTATION_LIST = "substations.txt"
+
+
+def save_substation_partitions(
+    partitioned_data: Dict[str, Dict],
+    subs: List[Substation],
+    output_dir: str
+    ) -> List[str]:
+    """
+    Save the partition of every substation to its own JSON file, <output_dir>/<sub_id>.json,
+    with the substation location, so a primary network can be generated for one substation
+    without reading the partitions of the others. The IDs of the saved substations are
+    listed in <output_dir>/substations.txt, which is written last.
+
+    Args:
+        partitioned_data (Dict[str, Dict]): Output of NetworkPartitioner.build_partitioning
+        subs (List[Substation]): Substations (locations of the partitioned ones are saved)
+        output_dir (str): Directory for the partition files
+
+    Returns:
+        List[str]: IDs of the saved substations
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    cords = {str(sub.id): list(sub.cord) for sub in subs}
+    sub_ids = []
+    for sub_id, part in partitioned_data.items():
+        with open(output_path / f"{sub_id}.json", 'w') as f:
+            json.dump({"substation": {"id": sub_id, "cord": cords[sub_id]}, **part}, f)
+        sub_ids.append(str(sub_id))
+    (output_path / SUBSTATION_LIST).write_text("".join(f"{sid}\n" for sid in sub_ids))
+    return sub_ids
+
+
+def read_substation_list(partition_dir: str) -> List[str]:
+    """IDs of the substations saved by save_substation_partitions."""
+    list_file = Path(partition_dir) / SUBSTATION_LIST
+    if not list_file.exists():
+        raise FileNotFoundError(f"Substation list not found: {list_file}")
+    return [line.strip() for line in list_file.read_text().splitlines() if line.strip()]
+
+
+def load_substation_partition(
+    partition_dir: str,
+    sub_id: str
+    ) -> Tuple[Substation, Dict[str, Dict]]:
+    """
+    Load the partition of one substation saved by save_substation_partitions.
+
+    Returns:
+        Tuple[Substation, Dict[str, Dict]]: The substation and its partition data
+            ({"nodelist": ..., "edgelist": ...})
+
+    Raises:
+        FileNotFoundError: If the partition file of the substation doesn't exist
+    """
+    input_path = Path(partition_dir) / f"{sub_id}.json"
+    if not input_path.exists():
+        raise FileNotFoundError(f"Partition file not found for substation {sub_id}: {input_path}")
+    with open(input_path, 'r') as f:
+        data = json.load(f)
+    sub = Substation(id=str(data["substation"]["id"]), cord=tuple(data["substation"]["cord"]))
+    return sub, {"nodelist": data["nodelist"], "edgelist": data["edgelist"]}

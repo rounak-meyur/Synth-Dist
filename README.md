@@ -47,16 +47,21 @@ Synth-Dist/
 │   ├── secnet_utils.py      # Secondary network utilities
 │   └── stats_utils.py       # Run statistics
 ├── scripts/                 # Standalone helper scripts
-│   ├── downloader.py        # net.science CSV downloader
-│   ├── get_load_csv.py      # Build per-region home load CSVs
-│   └── homes.py             # Collect home IDs into out/homes.json
+│   ├── downloader.py        # Download per-county load files from net.science
+│   ├── get_load_csv.py      # Build the home load CSVs (<region>-home-load.csv) from them
+│   ├── homes.py             # Collect home IDs into out/homes.json
+│   └── slurm/submit.sh      # Submit the pipeline for a group of regions to SLURM
 ├── tests/                   # pytest suite
 ├── configs/                 # Configuration files
 │   ├── config_heuristic.yaml
 │   ├── config_milp.yaml
-│   └── logging_config.ini
+│   ├── logging_config.ini
+│   └── regions/             # Groups of regions
+│       ├── virginia.yaml          # all of Virginia (default)
+│       └── northern_virginia.yaml # Northern Virginia
 ├── data/                    # Input data
-│   ├── load/                # Home load CSVs (<region>-home-load.csv)
+│   ├── load/                # Home load CSVs of regions 121, 161 and sample 999 (<region>-home-load.csv)
+│   ├── load_51/             # Home load CSVs of every Virginia county (not in git, see below)
 │   └── substations.csv      # Substation locations
 ├── out/, figs/, logs/, cache/  # Generated outputs (git-ignored)
 ├── main.py                  # Main execution script
@@ -97,49 +102,181 @@ Tests marked `integration` need the cached road network in `out/interim/` and ar
 ## 🚀 Usage
 
 1. Prepare your input data:
-   - Home locations and load data (CSV)
+   - Home locations and load data (CSV), one file per region (county)
    - Substation locations (CSV)
-   - Configuration file (YAML)
+   - Configuration file (YAML) and group configuration file (YAML)
 
 2. Run the main script:
 ```bash
-uv run main.py -c configs/config_heuristic.yaml -r region_ID
+uv run main.py -c configs/config_heuristic.yaml -g configs/regions/northern_virginia.yaml
 ```
 
-To generate visualization plots, add the `-p` flag:
-```bash
-uv run main.py -c configs/config_heuristic.yaml -r region_ID -p
+### Home load data
+The repository only contains the home load files of regions 121 and 161 (and of the
+sample region 999) in `data/load/`. The `data/load_51/` directory with the files of every
+Virginia county is **not committed to git**. To run the pipeline on any other region:
+
+1. Download the load files of the counties with `scripts/downloader.py`. It downloads
+   `<PREFIX><county>-20140523.csv` (e.g. `VA013-20140523.csv`, hourly loads of every home
+   in kWh) from the net.science file service for every region of a group configuration
+   file, or for the regions given with `-r`, and skips files already downloaded:
+   ```bash
+   uv run python scripts/downloader.py -g configs/regions/virginia.yaml --prefix VA -o data/raw/load_VA
+   ```
+   Use `--base-url` if the files are in another net.science folder, and `--date` for
+   another date in the file names.
+2. Build the home load files with `scripts/get_load_csv.py`. It adds the location of every
+   home from the synthetic household files (`household_<census tract>.csv`, with columns
+   `SYNTHETIC_HID`, `longitude` and `latitude`), converts the loads to W and writes
+   `<county>-home-load.csv` (format in [Homes CSV](#homes-csv)). Homes without a location
+   are left out:
+   ```bash
+   uv run python scripts/get_load_csv.py -i data/raw/load_VA --household-dir data/raw/households_VA \
+       -o data/load_51 --prefix VA
+   ```
+3. Point `inputs.home_csv_dir` to the output directory (with a trailing `/`) in the group
+   configuration file, or in the configuration file if the group file does not set it.
+
+For another state, use its abbreviation as `--prefix`, its counties in the group file
+(`-g`) and its own output directory.
+
+`configs/regions/virginia.yaml` (the default) and `configs/regions/northern_virginia.yaml`
+point to `data/load_51/`, so they need these files. To run only the committed regions,
+use a group file that leaves the input directory at `data/load/` from the configuration
+file:
+```yaml
+# configs/regions/committed.yaml
+state: 51
+group:
+  name: committed
+  regions: ["121", "161"]
 ```
+```bash
+uv run main.py -g configs/regions/committed.yaml
+```
+
+### Groups of regions and pipeline stages
+The pipeline runs on a **group** of regions listed in a group configuration file
+(`configs/regions/*.yaml`, default: all of Virginia). The group file sets the state (FIPS
+code, required) and the regions. It is merged over the configuration file, so it can also
+override settings such as the input directory:
+
+```yaml
+state: 51
+inputs:
+  home_csv_dir: "data/load_51/"
+group:
+  name: northern_virginia
+  regions: ["013", "059", "107", "153", "510", "600", "610", "683", "685"]
+```
+
+The pipeline has four stages:
+
+| Stage | Runs once per | Does |
+|-------|---------------|------|
+| `secnet` | region | Road network, home to road mapping and secondary network |
+| `partition` | group | Merges the secondary networks of all regions and assigns every transformer to a substation serving the group |
+| `primnet` | substation | Primary network of the substation |
+| `finalnet` | group | Combines the primary networks with the secondary networks of all regions |
+
+Secondary networks of different regions, and primary networks of different substations,
+are independent of each other, so they can run in parallel. Because the partitioning
+sees all regions at once, a substation near a county border serves homes on both sides
+of it.
+
+`all` (the default stage) runs every stage in order in one process. The stages can also be
+run separately; the stage name comes first:
+```bash
+G=configs/regions/northern_virginia.yaml
+uv run main.py secnet -g $G -r 013              # one region (default: every region of the group)
+uv run main.py partition -g $G                  # after secnet finished for every region
+uv run main.py primnet -g $G -s 123456          # one substation (default: every substation)
+uv run main.py finalnet -g $G                   # after primnet finished for every substation
+```
+
+- `-r` runs the given regions instead of the group's regions. With `all`, `partition` and
+  `finalnet`, they form a group named after them, e.g. `uv run main.py -r 999` runs the
+  sample region on its own.
+- `--task-index i --task-count n` makes `secnet`/`primnet` run every n-th region or
+  substation starting at the i-th, so that n jobs share the work.
+- `--list` prints the regions (`secnet`) or substations (`primnet`) a task would run.
+- `-p` generates plots of the merged network (after `partition`) and of the final
+  network (after `finalnet`).
+
+A group stage stops with an error if an earlier stage has not finished, or was run with
+different parameters, for some region or substation.
+
+### Running on a SLURM cluster
+`scripts/slurm/submit.sh` submits a group as four dependent jobs: a job array with one
+task per region for `secnet`, one `partition` job, a job array for `primnet` and one
+`finalnet` job. Each job starts only after the previous one succeeded.
+
+```bash
+scripts/slurm/submit.sh [GROUP_CONFIG] [CONFIG] [-- EXTRA_MAIN_ARGS...]
+scripts/slurm/submit.sh configs/regions/northern_virginia.yaml configs/config_heuristic.yaml
+scripts/slurm/submit.sh configs/regions/virginia.yaml configs/config_milp.yaml -- --from-scratch
+```
+
+Configure the script for your cluster first, by editing the settings at its top or by
+setting them as environment variables:
+
+| Setting | Meaning |
+|---------|---------|
+| `ACCOUNT` | Allocation/account charged for the jobs (`sbatch --account`). Empty by default; set it if your cluster requires one. |
+| `PARTITION` | Partition/queue the jobs run in (`sbatch --partition`). Empty: the cluster's default partition. |
+| `QOS` | Quality of service (`sbatch --qos`), if your cluster uses one |
+| `SBATCH_EXTRA` | Any other `sbatch` options for every job, e.g. `"--constraint=cpu"` |
+| `RUN` | Command that runs Python in the project environment (default `uv run`; e.g. `"conda run -n synth python"`) |
+| `SECNET_TIME`, `SECNET_MEM`, `SECNET_CPUS`, `SECNET_MAX_RUNNING` | Time limit, memory, CPUs and maximum number of concurrently running tasks of the secnet array |
+| `PARTITION_TIME`, `PARTITION_MEM` | Resources of the partition job, which holds the merged network of the whole group |
+| `PRIMNET_TASKS`, `PRIMNET_TIME`, `PRIMNET_MEM`, `PRIMNET_CPUS`, `PRIMNET_MAX_RUNNING` | Number of tasks the substations are split over, and their resources (raise `PRIMNET_CPUS` for MILP solver threads) |
+| `FINALNET_TIME`, `FINALNET_MEM` | Resources of the finalnet job |
+
+Empty settings are not passed to `sbatch`. For example:
+```bash
+ACCOUNT=my_allocation PARTITION=compute PARTITION_MEM=256G \
+    scripts/slurm/submit.sh configs/regions/virginia.yaml
+```
+
+The project environment must be available on the compute nodes (e.g. run `uv sync` in the
+repository once). Jobs run in the repository root, and SLURM output goes to `logs/slurm/`.
+Road networks are downloaded from OpenStreetMap in the `secnet` jobs, so compute nodes
+need internet access; otherwise run the `secnet` stage where internet is available
+and submit the remaining stages. A failed job can simply be resubmitted: finished
+regions and substations are reused from their checkpoints.
 
 ### Checkpoints and run statistics
-Each stage (roads, mapping, secondary network, partitioning, primary network, final
-network) saves its outputs and is
-reused by later runs. A stage is rerun when its inputs or parameters change, when an
-earlier stage was rerun, or when its outputs are missing; the record is kept in
-`out/interim/{region}_checkpoints.json`. An interrupted secondary network stage resumes
-from the road links that already finished.
+Each stage saves its outputs and is reused by later runs. A stage is rerun when its
+inputs or parameters change, or when its outputs are missing. The region stages (roads,
+mapping, secondary network) are recorded in `out/interim/{region}_checkpoints.json`; an
+interrupted secondary network stage resumes from the road links that already finished.
+The group stages are recorded in `out/interim/{group}_group_checkpoints.json` and every
+substation's primary network in `out/interim/{group}_primnet/{substation}_checkpoints.json`.
+Group stages compare the contents of the files they read, so they are reused when a rerun
+of an earlier stage produced the same outputs.
 
-To ignore saved outputs and run every stage again, use `--from-scratch` (or set
+To ignore saved outputs and run the stages again, use `--from-scratch` (or set
 `miscellaneous.from_scratch: true` in the config):
 ```bash
-uv run main.py -c configs/config_heuristic.yaml -r region_ID --from-scratch
+uv run main.py -g configs/regions/northern_virginia.yaml --from-scratch
 ```
 
 The final distribution network (substations, road nodes, transformers and homes with
 feeder, primary and secondary lines) is written to
-`out/finalnet/{region}_distribution_network_nodes.csv` and `_edges.csv`.
+`out/finalnet/{group}_distribution_network_nodes.csv` and `_edges.csv`.
 
-Compute time, peak memory and data sizes (homes, road nodes/edges, transformers,
-secondary edges, per-substation partitions, ...) of every stage are written to
-`out/stats/{region}_run_stats.json`.
+Compute time, peak memory and data sizes of every stage are written to
+`out/stats/{region}_run_stats.json` (homes, road nodes/edges, transformers, secondary
+edges, ...), `out/stats/{group}_group_run_stats.json` (partitions, primary and final
+networks) and `out/stats/{group}_primnet/{substation}_run_stats.json`.
 
 ## 📊 Configuration file
 
-The program uses YAML configuration files with the following key sections:
+The program uses YAML configuration files with the following key sections. The state
+(FIPS code) is not set here: it comes from the group configuration file, together with
+the regions (see [Groups of regions and pipeline stages](#groups-of-regions-and-pipeline-stages)).
 
 ```yaml
-state: 51
-
 inputs:
   home_csv_dir: "data/load/"
   substation_csv: "data/substations.csv"
@@ -148,6 +285,7 @@ miscellaneous:
   log_dir: "logs/"
   intermediate_dir: "out/interim/"
   mapping_dir: "out/mapping/"
+  stats_dir: "out/stats/"
   padding: 0.001
 
 secnet:
@@ -196,9 +334,16 @@ The program generates several output files:
   - `{region}_secondary_edges.csv`: Secondary network connections
   - `{region}_road_transformer_edges.txt`: Road-transformer sequences
 
+- **Partitioning** (`out/interim/{group}_partition/`):
+  - `{substation_id}.json`: Road network and transformers assigned to a substation
+  - `substations.txt`: Substations serving the group
+
 - **Primary Network**:
-  - `{substation_id}_nodes.csv`: Primary network nodes
-  - `{substation_id}_edges.csv`: Primary network connections
+  - `{group}_{substation_id}_nodes.csv`: Primary network nodes
+  - `{group}_{substation_id}_edges.csv`: Primary network connections
+
+- **Final Network**:
+  - `{group}_distribution_network_nodes.csv` / `_edges.csv`
 
 - **Visualizations** (with `-p` flag):
   - Network plots in the `figs/` directory

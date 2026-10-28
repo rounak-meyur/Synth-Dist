@@ -37,14 +37,22 @@ def _now() -> str:
 class RunStats:
     """Collect per-stage statistics and save them as JSON."""
 
-    def __init__(self, output_file: str, **run_info: Any):
+    def __init__(self, output_file: str, keep_stages: bool = False, **run_info: Any):
         """
         Args:
             output_file (str): Path of the JSON statistics file
+            keep_stages (bool): Keep the statistics of stages already saved in the file
+                (stages run by an earlier job); stages run now replace them
             run_info: Run level details (region, config file, method, ...)
         """
         self.output_file = Path(output_file)
         self._t0 = time.perf_counter()
+        previous = {}
+        if keep_stages and self.output_file.exists():
+            try:
+                previous = json.loads(self.output_file.read_text()).get("stages", {})
+            except (json.JSONDecodeError, AttributeError):
+                logger.warning(f"Ignoring unreadable statistics file {self.output_file}")
         self.data: Dict[str, Any] = {
             **run_info,
             "status": "running",
@@ -52,7 +60,7 @@ class RunStats:
             "finished_at": None,
             "total_seconds": None,
             "peak_memory_mb": None,
-            "stages": {},
+            "stages": previous,
         }
         self.save()
 

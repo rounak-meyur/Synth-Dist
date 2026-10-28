@@ -10,7 +10,13 @@ from geopy.distance import geodesic
 
 from conftest import SIZE, geodesic_m, grid_node_coord, grid_node_id, make_combined_grid
 from utils.dataloader import Substation
-from utils.partition_utils import NetworkPartitioner, load_partitioning
+from utils.partition_utils import (
+    NetworkPartitioner,
+    load_partitioning,
+    load_substation_partition,
+    read_substation_list,
+    save_substation_partitions,
+)
 
 def substation_at(sub_id: str, i: int, j: int, offset: float = 0.00005) -> Substation:
     x, y = grid_node_coord(i, j)
@@ -178,3 +184,27 @@ def test_load_partitioning_errors(tmp_path):
     bad_id.write_text(json.dumps({"sub-A": {"nodelist": {}, "edgelist": {}}}))
     with pytest.raises(ValueError, match="Invalid substation ID"):
         load_partitioning(str(bad_id))
+
+
+
+# save_substation_partitions / load_substation_partition
+
+def test_substation_partitions_round_trip(saved_partition, tmp_path):
+    G, subs, assignments, output = saved_partition
+    data = json.loads(output.read_text())
+    partition_dir = tmp_path / "group_partition"
+    saved = save_substation_partitions(data, subs, str(partition_dir))
+
+    assert saved == ["101", "202"]
+    assert read_substation_list(str(partition_dir)) == saved
+    for sub in subs[:2]:
+        loaded_sub, part = load_substation_partition(str(partition_dir), sub.id)
+        assert loaded_sub == sub
+        assert part == data[sub.id], "same partition data as the combined file"
+
+
+def test_substation_partition_errors(tmp_path):
+    with pytest.raises(FileNotFoundError, match="Substation list"):
+        read_substation_list(str(tmp_path))
+    with pytest.raises(FileNotFoundError, match="substation 101"):
+        load_substation_partition(str(tmp_path), "101")

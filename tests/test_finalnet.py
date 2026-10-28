@@ -43,12 +43,12 @@ def write_primary(prim_dir, sub_id, nodes, edges):
     ).to_csv(prim_dir / f"{REGION}_{sub_id}_edges.csv", index=False)
 
 
-def write_secondary(sec_dir, edges):
+def write_secondary(sec_dir, edges, region=REGION):
     sec_dir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
         [{"from_node": u, "to_node": v, "length": length, "road_start": 1, "road_end": 2, "road_edge_key": 0}
          for u, v, length in edges]
-    ).to_csv(sec_dir / f"{REGION}_secondary_edges.csv", index=False)
+    ).to_csv(sec_dir / f"{region}_secondary_edges.csv", index=False)
 
 
 @pytest.fixture
@@ -117,6 +117,20 @@ def test_combine_missing_secondary_file(network_files):
     (sec / f"{REGION}_secondary_edges.csv").unlink()
     with pytest.raises(FileNotFoundError, match="Secondary network file"):
         combine(network_files)
+
+
+def test_combine_reads_secondary_networks_of_several_regions(network_files):
+    """A group's primary networks are combined with the secondary networks of all its regions."""
+    prim, sec = network_files
+    (sec / f"{REGION}_secondary_edges.csv").unlink()
+    write_secondary(sec, [("T1", "11", 11.0), ("11", "12", 11.0)], region="701")
+    write_secondary(sec, [("T2", "21", 11.0)], region="702")
+    graph = combine_networks(["4242"], REGION, list(HOMES), str(prim), str(sec), secondary_regions=["701", "702"])
+    assert set(graph.nodes) == {"4242", "1", "2", "T1", "T2", "11", "12", "21"}
+    assert nx.is_tree(graph)
+
+    with pytest.raises(FileNotFoundError, match="703_secondary_edges"):
+        combine_networks(["4242"], REGION, list(HOMES), str(prim), str(sec), secondary_regions=["701", "703"])
 
 
 def test_combine_rejects_transformer_without_primary_network(network_files):
