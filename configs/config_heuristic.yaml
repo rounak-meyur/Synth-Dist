@@ -1,5 +1,4 @@
 inputs:
-  home_csv_dir: "data/load/"
   substation_csv: "data/substations.csv"
 
 miscellaneous:
@@ -10,6 +9,14 @@ miscellaneous:
   padding: 0.001
   # Ignore saved outputs and rerun every stage (same as the --from-scratch flag)
   from_scratch: false
+
+osm:
+  # Overpass API server for the road network downloads; use another public instance or
+  # your own (https://github.com/drolbr/Overpass-API) when the default one is busy
+  overpass_url: "https://overpass-api.de/api"
+  # retries of a failed download: wait retry_wait seconds, doubled after every failure
+  max_retries: 6
+  retry_wait: 30
 
 secnet:
   out_dir: "out/secnet/"

@@ -1,0 +1,18 @@
+# Group configuration: Roanoke County, Montgomery County and the independent cities of
+# Roanoke and Salem. Merged over the configuration file (-c), so any setting there can be
+# overridden here.
+#   uv run main.py -g configs/regions/roanoke_montgomery.yaml
+state: 51
+
+inputs:
+  home_csv_dir: "data/load/"
+
+group:
+  name: roanoke_montgomery
+  # county FIPS codes (quoted to keep the leading zeros)
+  regions: [
+    "121",  # Montgomery County
+    "161",  # Roanoke County
+    "770",  # Roanoke (city)
+    "775",  # Salem (city)
+  ]
