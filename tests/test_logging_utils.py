@@ -57,3 +57,32 @@ def test_progress_logging_keeps_console_level(tmp_path, restore_logging, capsys)
     assert "warning message" in console
     assert "info message" not in console, "INFO must stay out of the console (WARNING level)"
     assert "info message" in (tmp_path / "app.log").read_text()
+
+
+def test_file_handler_reopens_log_file_after_failed_write(tmp_path, restore_logging):
+    """A sync client replacing the open log file must not lose the following messages."""
+    from utils.logging_utils import ReopeningFileHandler
+
+    log_file = tmp_path / "app.log"
+    handler = ReopeningFileHandler(str(log_file))
+    logger = logging.getLogger("reopen_test")
+    logger.addHandler(handler)
+    logger.propagate = False
+    try:
+        logger.warning("before")
+
+        class StaleStream:
+            def write(self, msg):
+                raise TimeoutError(60, "Operation timed out")
+            flush = write
+
+            def close(self):
+                raise TimeoutError(60, "Operation timed out")
+
+        handler.stream = StaleStream()
+        logger.warning("after")
+        logger.warning("later")
+    finally:
+        logger.removeHandler(handler)
+        handler.close()
+    assert log_file.read_text().splitlines() == ["before", "after", "later"]

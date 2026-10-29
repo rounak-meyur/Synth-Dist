@@ -14,6 +14,40 @@ from contextlib import contextmanager
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 
+class ReopeningFileHandler(logging.FileHandler):
+    """
+    FileHandler that reopens its log file when writing to it fails.
+
+    File sync clients (e.g. OneDrive) can replace a file while it is open, after which every
+    write through the old handle fails ("TimeoutError: [Errno 60] Operation timed out").
+    The record is then written through a newly opened handle instead of being lost.
+    """
+
+    def emit(self, record):
+        try:
+            msg = self.format(record) + self.terminator
+            if self.stream is None:
+                self.stream = self._open()
+            try:
+                self.stream.write(msg)
+                self.stream.flush()
+            except OSError:
+                self._reopen()
+                self.stream.write(msg)
+                self.stream.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
+
+    def _reopen(self):
+        try:
+            self.stream.close()
+        except OSError:
+            pass  # buffered data of the failed write cannot be flushed through the old handle
+        self.stream = self._open()
+
+
 def add_run_separator(log_file_path: str):
     """
     Add a separator to the log file to mark the beginning of a new run.
