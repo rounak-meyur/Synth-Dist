@@ -28,7 +28,7 @@ RUN="${RUN:-uv run}"          # command that runs Python in the project environm
 SECNET_TIME="${SECNET_TIME:-12:00:00}"
 SECNET_MEM="${SECNET_MEM:-16G}"
 SECNET_CPUS="${SECNET_CPUS:-1}"
-SECNET_MAX_RUNNING="${SECNET_MAX_RUNNING:-50}"     # regions running at the same time
+SECNET_MAX_RUNNING="${SECNET_MAX_RUNNING:-4}"      # regions running at the same time (each downloads its roads from Overpass)
 
 PARTITION_TIME="${PARTITION_TIME:-24:00:00}"
 PARTITION_MEM="${PARTITION_MEM:-128G}"

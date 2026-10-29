@@ -57,10 +57,11 @@ Synth-Dist/
 │   ├── config_milp.yaml
 │   ├── logging_config.ini
 │   └── regions/             # Groups of regions
-│       ├── virginia.yaml          # all of Virginia (default)
-│       └── northern_virginia.yaml # Northern Virginia
+│       ├── virginia.yaml           # all of Virginia (default)
+│       ├── northern_virginia.yaml  # Northern Virginia
+│       └── roanoke_montgomery.yaml # Montgomery and Roanoke counties, Roanoke and Salem cities
 ├── data/                    # Input data
-│   ├── load/                # Home load CSVs of regions 121, 161 and sample 999 (<region>-home-load.csv)
+│   ├── load/                # Home load CSVs of regions 121, 161, 770, 775 and sample 999 (<region>-home-load.csv)
 │   ├── load_51/             # Home load CSVs of every Virginia county (not in git, see below)
 │   └── substations.csv      # Substation locations
 ├── out/, figs/, logs/, cache/  # Generated outputs (git-ignored)
@@ -112,9 +113,11 @@ uv run main.py -c configs/config_heuristic.yaml -g configs/regions/northern_virg
 ```
 
 ### Home load data
-The repository only contains the home load files of regions 121 and 161 (and of the
-sample region 999) in `data/load/`. The `data/load_51/` directory with the files of every
-Virginia county is **not committed to git**. To run the pipeline on any other region:
+The repository only contains the home load files of regions 121 (Montgomery County) and
+161 (Roanoke County), and of the sample region 999, in `data/load/`. The `data/load_51/`
+directory with the files of every Virginia county is **not committed to git**; neither are
+the files of the cities of Roanoke (770) and Salem (775), which are copied from it to
+`data/load/`. To run the pipeline on any other region:
 
 1. Download the load files of the counties with `scripts/downloader.py`. It downloads
    `<PREFIX><county>-20140523.csv` (e.g. `VA013-20140523.csv`, hourly loads of every home
@@ -134,32 +137,44 @@ Virginia county is **not committed to git**. To run the pipeline on any other re
    uv run python scripts/get_load_csv.py -i data/raw/load_VA --household-dir data/raw/households_VA \
        -o data/load_51 --prefix VA
    ```
-3. Point `inputs.home_csv_dir` to the output directory (with a trailing `/`) in the group
-   configuration file, or in the configuration file if the group file does not set it.
+3. Point `inputs.home_csv_dir` in the group configuration file to the output directory
+   (with a trailing `/`).
 
 For another state, use its abbreviation as `--prefix`, its counties in the group file
 (`-g`) and its own output directory.
 
 `configs/regions/virginia.yaml` (the default) and `configs/regions/northern_virginia.yaml`
-point to `data/load_51/`, so they need these files. To run only the committed regions,
-use a group file that leaves the input directory at `data/load/` from the configuration
-file:
+point to `data/load_51/`, so they need these files. `configs/regions/roanoke_montgomery.yaml`
+(Montgomery and Roanoke counties with the cities of Roanoke and Salem) points to
+`data/load/`; it needs the files of 770 and 775 copied there:
+```bash
+cp data/load_51/770-home-load.csv data/load_51/775-home-load.csv data/load/
+uv run main.py -g configs/regions/roanoke_montgomery.yaml
+```
+
+To run only the committed regions (Montgomery and Roanoke counties), use a group file that
+points to `data/load/`:
 ```yaml
-# configs/regions/committed.yaml
+# configs/regions/montgomery_roanoke.yaml
 state: 51
+inputs:
+  home_csv_dir: "data/load/"
 group:
-  name: committed
-  regions: ["121", "161"]
+  name: montgomery_roanoke
+  regions: [
+    "121",  # Montgomery County
+    "161",  # Roanoke County
+  ]
 ```
 ```bash
-uv run main.py -g configs/regions/committed.yaml
+uv run main.py -g configs/regions/montgomery_roanoke.yaml
 ```
 
 ### Groups of regions and pipeline stages
 The pipeline runs on a **group** of regions listed in a group configuration file
 (`configs/regions/*.yaml`, default: all of Virginia). The group file sets the state (FIPS
-code, required) and the regions. It is merged over the configuration file, so it can also
-override settings such as the input directory:
+code), the directory of the home load files and the regions; all three are required. It
+is merged over the configuration file, so it can also override any other setting:
 
 ```yaml
 state: 51
@@ -227,7 +242,7 @@ setting them as environment variables:
 | `QOS` | Quality of service (`sbatch --qos`), if your cluster uses one |
 | `SBATCH_EXTRA` | Any other `sbatch` options for every job, e.g. `"--constraint=cpu"` |
 | `RUN` | Command that runs Python in the project environment (default `uv run`; e.g. `"conda run -n synth python"`) |
-| `SECNET_TIME`, `SECNET_MEM`, `SECNET_CPUS`, `SECNET_MAX_RUNNING` | Time limit, memory, CPUs and maximum number of concurrently running tasks of the secnet array |
+| `SECNET_TIME`, `SECNET_MEM`, `SECNET_CPUS`, `SECNET_MAX_RUNNING` | Time limit, memory, CPUs and maximum number of concurrently running tasks of the secnet array (default 4: every task downloads its roads from the Overpass API, which limits concurrent requests) |
 | `PARTITION_TIME`, `PARTITION_MEM` | Resources of the partition job, which holds the merged network of the whole group |
 | `PRIMNET_TASKS`, `PRIMNET_TIME`, `PRIMNET_MEM`, `PRIMNET_CPUS`, `PRIMNET_MAX_RUNNING` | Number of tasks the substations are split over, and their resources (raise `PRIMNET_CPUS` for MILP solver threads) |
 | `FINALNET_TIME`, `FINALNET_MEM` | Resources of the finalnet job |
@@ -244,6 +259,24 @@ Road networks are downloaded from OpenStreetMap in the `secnet` jobs, so compute
 need internet access; otherwise run the `secnet` stage where internet is available
 and submit the remaining stages. A failed job can simply be resubmitted: finished
 regions and substations are reused from their checkpoints.
+
+### Overpass API errors
+Road networks are downloaded from the public Overpass API (OpenStreetMap), which rejects
+requests when it is busy ("This Overpass API server is currently at capacity"). A failed
+download is retried with exponential backoff, configured in the `osm` section of the
+configuration file:
+
+```yaml
+osm:
+  overpass_url: "https://overpass-api.de/api"
+  max_retries: 6    # retries of a failed download
+  retry_wait: 30    # seconds before the first retry, doubled after every failure
+```
+
+If downloads keep failing, run fewer regions at the same time (`SECNET_MAX_RUNNING` for
+SLURM), rerun later (downloaded road networks are saved and reused), or point
+`overpass_url` to another public Overpass instance or to your own
+([Overpass API installation](https://github.com/drolbr/Overpass-API)).
 
 ### Checkpoints and run statistics
 Each stage saves its outputs and is reused by later runs. A stage is rerun when its
@@ -273,12 +306,11 @@ networks) and `out/stats/{group}_primnet/{substation}_run_stats.json`.
 ## 📊 Configuration file
 
 The program uses YAML configuration files with the following key sections. The state
-(FIPS code) is not set here: it comes from the group configuration file, together with
-the regions (see [Groups of regions and pipeline stages](#groups-of-regions-and-pipeline-stages)).
+(FIPS code) and the directory of the home load files are not set here: they come from the
+group configuration file, together with the regions (see [Groups of regions and pipeline stages](#groups-of-regions-and-pipeline-stages)).
 
 ```yaml
 inputs:
-  home_csv_dir: "data/load/"
   substation_csv: "data/substations.csv"
 
 miscellaneous:

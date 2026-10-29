@@ -34,6 +34,45 @@ def test_load_roads_queries_osm_with_home_hull(mock_osm, homes):
         assert polygon.buffer(1e-9).contains(Point(home.cord))
 
 
+BUSY = osm_utils.ox._errors.ResponseStatusCodeError(
+    "'overpass-api.de' responded: 503 Service Unavailable This Overpass API server is currently at capacity."
+)
+
+
+def test_load_roads_retries_busy_overpass_with_exponential_backoff(monkeypatch, road_grid, homes):
+    osm = MagicMock(side_effect=[BUSY, BUSY, road_grid])
+    sleep = MagicMock()
+    monkeypatch.setattr(osm_utils.ox, "graph_from_polygon", osm)
+    monkeypatch.setattr(osm_utils.time, "sleep", sleep)
+
+    G = load_roads(homes, max_retries=3, retry_wait=10)
+
+    assert G is road_grid
+    assert osm.call_count == 3
+    assert [c.args[0] for c in sleep.call_args_list] == [10, 20]
+
+
+def test_load_roads_gives_up_after_max_retries(monkeypatch, homes):
+    osm = MagicMock(side_effect=BUSY)
+    sleep = MagicMock()
+    monkeypatch.setattr(osm_utils.ox, "graph_from_polygon", osm)
+    monkeypatch.setattr(osm_utils.time, "sleep", sleep)
+
+    with pytest.raises(osm_utils.ox._errors.ResponseStatusCodeError, match="at capacity"):
+        load_roads(homes, max_retries=2, retry_wait=1)
+    assert osm.call_count == 3
+    assert [c.args[0] for c in sleep.call_args_list] == [1, 2]
+
+
+def test_load_roads_does_not_retry_other_errors(monkeypatch, homes):
+    osm = MagicMock(side_effect=KeyError("bug"))
+    monkeypatch.setattr(osm_utils.ox, "graph_from_polygon", osm)
+    monkeypatch.setattr(osm_utils.time, "sleep", MagicMock())
+    with pytest.raises(KeyError):
+        load_roads(homes)
+    assert osm.call_count == 1
+
+
 def test_load_roads_adds_missing_geometry(mock_osm, homes):
     G = load_roads(homes)
 

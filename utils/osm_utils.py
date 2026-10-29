@@ -3,6 +3,8 @@ from shapely.geometry import Point, Polygon, LineString
 from shapely.ops import unary_union
 import shapely.wkt as wkt
 from typing import List
+import time
+import requests
 import matplotlib.pyplot as plt
 import networkx as nx
 import csv
@@ -27,18 +29,32 @@ if __name__ == "__main__":
 
 logger = LogManager.get_logger("osm_utils")
 
-def load_roads(homes: List[Home]):
+# Errors of a busy or unreachable Overpass server, worth retrying after a pause
+OVERPASS_ERRORS = (
+    ox._errors.ResponseStatusCodeError,
+    ox._errors.InsufficientResponseError,
+    requests.exceptions.RequestException,
+)
+
+def load_roads(homes: List[Home], max_retries: int = 6, retry_wait: float = 30.0):
     """
     Load road data from OpenStreetMap based on the bounding polygon of given homes.
 
+    A busy Overpass server (e.g. "server is currently at capacity") is retried with
+    exponential backoff: wait retry_wait seconds, then double the wait after every failure.
+
     Args:
         homes (List[Home]): A list of Home objects containing coordinate information.
+        max_retries (int): Number of retries after a failed Overpass request.
+        retry_wait (float): Seconds to wait before the first retry.
 
     Returns:
         networkx.MultiDiGraph: A graph representing the road network.
 
     Raises:
         ValueError: If no homes are provided or if no roads are found in the area.
+        osmnx._errors.ResponseStatusCodeError, InsufficientResponseError or
+        requests.exceptions.RequestException: If the last retry fails as well.
     """
     if not homes:
         logger.error("No homes provided to load_roads")
@@ -51,9 +67,23 @@ def load_roads(homes: List[Home]):
     # Create a polygon from the points
     polygon = Polygon(unary_union(points).convex_hull)
 
-    logger.info("Loading road network from OpenStreetMap")
+    logger.info(f"Loading road network from OpenStreetMap ({ox.settings.overpass_url})")
     # Load the road network within the polygon with updated parameters
-    G = ox.graph_from_polygon(polygon, network_type="all", retain_all=True, truncate_by_edge=False)
+    wait = retry_wait
+    for attempt in range(max_retries + 1):
+        try:
+            G = ox.graph_from_polygon(polygon, network_type="all", retain_all=True, truncate_by_edge=False)
+            break
+        except OVERPASS_ERRORS as e:
+            if attempt == max_retries:
+                logger.error(f"Overpass request failed after {max_retries} retries: {e}")
+                raise
+            logger.warning(
+                f"Overpass request failed ({type(e).__name__}: {str(e)[:200]}); "
+                f"retry {attempt + 1}/{max_retries} in {wait:.0f} seconds"
+            )
+            time.sleep(wait)
+            wait *= 2
 
     if not G.edges:
         logger.error("No roads found in the given area")

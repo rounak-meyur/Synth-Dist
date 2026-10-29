@@ -229,7 +229,15 @@ def run_region(run, region):
             stage_stats["status"] = "reused"
         else:
             checkpoints.start("roads", roads_params)
-            roads = load_roads(homes)
+            osm_conf = conf.get("osm") or {}
+            if osm_conf.get("overpass_url"):
+                import osmnx as ox
+                ox.settings.overpass_url = osm_conf["overpass_url"]
+            roads = load_roads(
+                homes,
+                max_retries=osm_conf.get("max_retries", 6),
+                retry_wait=osm_conf.get("retry_wait", 30.0),
+            )
             save_road_network(
                 roads,
                 edgelist_file=road_edge_file,
@@ -611,6 +619,11 @@ def main(argv=None):
     conf = OmegaConf.merge(OmegaConf.load(args.configPath), OmegaConf.load(args.group))
     if "state" not in conf:
         raise SystemExit(f"Group configuration {args.group} must set the state (FIPS code), e.g. state: 51")
+    if not conf.get("inputs", {}).get("home_csv_dir"):
+        raise SystemExit(
+            f"Group configuration {args.group} must set the directory of the home load files, "
+            'e.g. inputs: {home_csv_dir: "data/load_51/"}'
+        )
     run = Run(conf, args)
     stage = args.stage
 

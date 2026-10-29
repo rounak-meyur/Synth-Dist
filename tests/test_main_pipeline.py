@@ -47,7 +47,6 @@ class Pipeline:
         regions = regions or {REGION: homes}
         self.conf = OmegaConf.load(REPO_ROOT / "configs/config_heuristic.yaml")
         # main.py builds paths by string concatenation, so directories need a trailing slash
-        self.conf.inputs.home_csv_dir = f"{base}/data/load/"
         self.conf.inputs.substation_csv = str(base / "substations.csv")
         self.conf.miscellaneous.log_dir = f"{base}/logs/"
         self.conf.miscellaneous.intermediate_dir = f"{base}/out/interim/"
@@ -60,7 +59,11 @@ class Pipeline:
 
         base.mkdir(parents=True, exist_ok=True)
         self.group_file = base / "group.yaml"
-        OmegaConf.save(OmegaConf.create({"state": 51, "group": {"name": group, "regions": list(regions)}}), self.group_file)
+        OmegaConf.save(OmegaConf.create({
+            "state": 51,
+            "inputs": {"home_csv_dir": f"{base}/data/load/"},
+            "group": {"name": group, "regions": list(regions)},
+        }), self.group_file)
         for region, region_homes in regions.items():
             write_homes_csv(base / f"data/load/{region}-home-load.csv", region_homes)
         # one substation inside the convex hull of the homes
@@ -704,6 +707,16 @@ def test_main_rejects_invalid_task_options(pair, args):
 
 
 def test_main_requires_state_in_group_config(pair):
-    OmegaConf.save(OmegaConf.create({"group": {"name": GROUP, "regions": [REGION]}}), pair.group_file)
+    group = OmegaConf.load(pair.group_file)
+    del group["state"]
+    OmegaConf.save(group, pair.group_file)
     with pytest.raises(SystemExit, match="must set the state"):
+        pair.run(no_osm())
+
+
+def test_main_requires_home_directory_in_group_config(pair):
+    group = OmegaConf.load(pair.group_file)
+    del group["inputs"]
+    OmegaConf.save(group, pair.group_file)
+    with pytest.raises(SystemExit, match="must set the directory of the home load files"):
         pair.run(no_osm())
