@@ -221,6 +221,20 @@ uv run main.py finalnet -g $G                   # after primnet finished for eve
 A group stage stops with an error if an earlier stage has not finished, or was run with
 different parameters, for some region or substation.
 
+#### Tracking progress of the primnet stage
+- On the console, a progress bar counts the finished substations of the job. A second bar
+  counts the solved feeder areas of the current substation. Before that bar appears, the
+  substation's network is split into feeder areas, which can take a while for a big one.
+- In the log file (`logs/application_{group}_primnet[_{task}].log`), a line
+  `Primary networks finished for i of n substations` is written after each substation.
+  Use `tail -f` on it, or on the SLURM output files in `logs/slurm/`.
+- Across all jobs of a group, compare the number of finished primary networks with the
+  number of substations:
+  ```bash
+  ls out/primnet/{group}_*_edges.csv | wc -l           # finished substations
+  wc -l < out/interim/{group}_partition/substations.txt  # all substations
+  ```
+
 ### Running on a SLURM cluster
 `scripts/slurm/submit.sh` submits a group as four dependent jobs: a job array with one
 task per region for `secnet`, one `partition` job, a job array for `primnet` and one

@@ -3,6 +3,10 @@ Tests for partitioning transformers to the nearest substation by network distanc
 (utils/partition_utils.py).
 """
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import networkx as nx
 import pytest
@@ -44,6 +48,17 @@ def test_find_nearest_road_nodes_for_each_substation():
     subs = [substation_at("1", 2, 5), substation_at("2", 12, 9)]
     nearest = NetworkPartitioner(G).find_nearest_road_nodes(subs, search_radius=0.001)
     assert nearest == {"1": grid_node_id(2, 5), "2": grid_node_id(12, 9)}
+
+
+def test_find_nearest_road_nodes_second_substation_gets_next_nearest_node(caplog):
+    """Two substations nearest to the same road node: the second one gets its next nearest road node."""
+    G = make_combined_grid()
+    x, y = grid_node_coord(5, 5)
+    first = Substation(id="1", cord=(x + 0.00005, y + 0.00001))
+    second = Substation(id="2", cord=(x + 0.0002, y + 0.00002))  # nearest (5,5), next nearest (6,5)
+    nearest = NetworkPartitioner(G).find_nearest_road_nodes([first, second], search_radius=0.001)
+    assert nearest == {"1": grid_node_id(5, 5), "2": grid_node_id(6, 5)}
+    assert "using the next nearest node" in caplog.text
 
 
 def test_find_nearest_road_nodes_retries_with_larger_radius():
@@ -118,6 +133,49 @@ def test_partition_drops_substation_with_small_cell():
     # the spur is re-assigned to A, the nearest remaining substation
     assert prev in assignments["A"]
     assert set(assignments["A"]) | set(assignments["B"]) == set(G.nodes)
+
+
+def test_partition_substations_with_same_road_node(caplog):
+    """Only the first of two substations with the same nearest road node gets its cell."""
+    G = make_combined_grid()
+    substation_nodes = {"A": grid_node_id(2, 2), "A2": grid_node_id(2, 2), "B": grid_node_id(13, 13)}
+    partitioner = NetworkPartitioner(G)
+    assignments = partitioner.partition_transformers(substation_nodes)
+    assert set(assignments) == {"A", "B"}
+    assert set(assignments["A"]) | set(assignments["B"]) == set(G.nodes)
+    assert "Substation A2 has the same nearest road node" in caplog.text
+
+    subs = [substation_at("A", 2, 2), substation_at("A2", 2, 2, offset=0.0001), substation_at("B", 13, 13)]
+    assert set(partitioner.build_partitioning(assignments, subs)) == {"A", "B"}
+
+
+PARTITION_SCRIPT = """
+import json
+from conftest import make_combined_grid
+from utils.dataloader import Substation
+from utils.partition_utils import NetworkPartitioner
+partitioner = NetworkPartitioner(make_combined_grid())
+nodes = list(partitioner.network.nodes)
+assignments = partitioner.partition_transformers({"A": nodes[0], "B": nodes[200]})
+subs = [Substation(id="A", cord=(0, 0)), Substation(id="B", cord=(0, 0))]
+print(json.dumps(partitioner.build_partitioning(assignments, subs)))
+"""
+
+
+def test_build_partitioning_is_the_same_in_every_run():
+    """
+    The saved partition must not depend on the string hash seed of the process, so that a
+    rerun of the partition stage gives identical files and the primary networks are reused.
+    """
+    root = Path(__file__).resolve().parent.parent
+    outputs = {
+        subprocess.run(
+            [sys.executable, "-c", PARTITION_SCRIPT], cwd=root, check=True, capture_output=True, text=True,
+            env={**os.environ, "PYTHONHASHSEED": seed, "PYTHONPATH": f"{root}{os.pathsep}{root / 'tests'}"},
+        ).stdout
+        for seed in ("1", "2", "3")
+    }
+    assert len(outputs) == 1
 
 
 def test_partition_raises_when_all_cells_are_small():

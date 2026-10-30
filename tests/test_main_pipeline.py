@@ -265,7 +265,9 @@ def test_main_changed_padding_reruns_mapping_and_later_stages(pipeline, road_gri
     pipeline.run(MagicMock(return_value=road_grid))
     pipeline.conf.miscellaneous.padding = 0.002
     log = pipeline.run(no_osm())
-    assert reused_stages(log) == {"roads"}
+    # the larger padding maps the homes the same way here, so the substation's partition is
+    # unchanged and its primary network is reused
+    assert reused_stages(log) == {"roads", "primnet"}
 
 
 def test_main_changed_homes_refetch_roads(pipeline, road_grid, homes):
@@ -290,6 +292,15 @@ def test_main_changed_substations_rerun_partition_only(pipeline, road_grid):
     assert not pipeline.out["assignment"].exists()
     assert (pipeline.base / f"out/primnet/{REGION}_5353_edges.csv").exists()
     assert not pipeline.out["primnet_edges"].exists(), "outputs of the old substation are removed"
+
+
+def test_main_partition_rerun_keeps_unchanged_primary_networks(pipeline, road_grid):
+    """Rerunning the partition stage from scratch does not discard primary networks it would rebuild unchanged."""
+    pipeline.run(MagicMock(return_value=road_grid))
+    pipeline.run(no_osm(), "partition", "-f")
+    assert pipeline.out["primnet_edges"].exists()
+    log = pipeline.run(no_osm(), "primnet")
+    assert f"Reusing saved primary network of substation {SUBSTATION_ID}" in log
 
 
 def test_main_missing_output_reruns_that_stage(pipeline, road_grid):

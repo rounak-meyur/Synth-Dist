@@ -9,6 +9,7 @@ import numpy as np
 import json
 import os
 import sys
+from tqdm import tqdm
 
 if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -212,7 +213,10 @@ class PrimaryNetworkGenerator:
         self._get_partitions(total_graph, max_feeder_capacity)
         
         # create optimal network for each partition
-        for nodelist in list(nx.connected_components(self.candidate_graph)):
+        feeder_areas = list(nx.connected_components(self.candidate_graph))
+        for nodelist in tqdm(
+            feeder_areas, desc=f"Feeder areas of substation {sub.id}", unit="area", leave=False,
+        ):
             graph = nx.subgraph(self.candidate_graph, list(nodelist))
         
             # solve for optimal network

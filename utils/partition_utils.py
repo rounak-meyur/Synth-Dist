@@ -164,7 +164,9 @@ class NetworkPartitioner:
     ) -> Dict[int, int]:
         """
         Find nearest road node for each substation.
-        Will retry with increased radius if no nodes found.
+        A road node is used for one substation only: when the nearest road node of a substation
+        is already the road node of an earlier substation, the next nearest one is used.
+        Will retry with increased radius if no (free) nodes found.
         
         Args:
             substations (List[Substation]): List of substations
@@ -191,8 +193,19 @@ class NetworkPartitioner:
                 dist = np.sqrt((lon - node_lon)**2 + (lat - node_lat)**2)
                 distances.append((dist, node_id))
             
-            # Select nearest node
-            nearest_node = min(distances, key=lambda x: x[0])[1]
+            # Select nearest node that is not the road node of another substation
+            taken = {node: sub_id for sub_id, node in substation_nodes.items()}
+            free = [(dist, node_id) for dist, node_id in sorted(distances, key=lambda x: (x[0], str(x[1])))
+                    if node_id not in taken]
+            if not free:
+                raise ValueError(f"All road nodes within radius {search_radius} of substation {substation.id} are used by other substations")
+            nearest_node = free[0][1]
+            closest_node = min(distances, key=lambda x: (x[0], str(x[1])))[1]
+            if closest_node in taken:
+                logger.warning(
+                    f"The nearest road network node {closest_node} to substation {substation.id} is the road "
+                    f"node of substation {taken[closest_node]}; using the next nearest node {nearest_node}"
+                )
             substation_nodes[substation.id] = nearest_node
             logger.info(f"The nearest road network node to substation {substation.id} is {nearest_node}")
         
@@ -211,8 +224,21 @@ class NetworkPartitioner:
         Returns:
             Dict[int, List[str]]: Mapping of substation ID to list of assigned transformer IDs
         """
+        # Substations with the same road node cannot be told apart by network distance; the first
+        # of them gets the cell of the road node (find_nearest_road_nodes gives each substation
+        # its own road node, so this only happens when the road nodes are given otherwise)
+        center_subs = {}
+        for sub_id, node in substation_nodes.items():
+            if node in center_subs:
+                logger.warning(
+                    f"Substation {sub_id} has the same nearest road node {node} as substation "
+                    f"{center_subs[node]}; no nodes are assigned to it"
+                )
+            else:
+                center_subs[node] = sub_id
+
         # Extract center nodes for Voronoi partitioning
-        centers = list(substation_nodes.values())
+        centers = list(center_subs)
         
         # First Voronoi partitioning
         cells = nx.voronoi_cells(self.network, centers, 'length')
@@ -226,24 +252,8 @@ class NetworkPartitioner:
         # Recompute Voronoi cells with valid centers
         cells = nx.voronoi_cells(self.network, valid_centers, 'length')
         
-        # Create assignments dictionary
-        assignments = {
-            sub_id: []
-            for sub_id, node in substation_nodes.items()
-            if node in valid_centers
-        }
-        
         # Assign transformers based on cell membership
-        for center_node in valid_centers:
-            # Find corresponding substation ID
-            sub_id = next(
-                sid for sid, node in substation_nodes.items() 
-                if node == center_node
-            )
-            
-            assignments[sub_id] = list(cells[center_node])
-        
-        return assignments
+        return {center_subs[center_node]: list(cells[center_node]) for center_node in valid_centers}
     
     def save_partitioning(
         self,
@@ -293,7 +303,7 @@ class NetworkPartitioner:
             sub_cord = sub.cord
             sub_id = str(sub.id)
             
-            if sub_id not in assignments:
+            if not assignments.get(sub_id):
                 logger.info(f"No nodes assigned to {sub_id}")
             
             else:
@@ -302,9 +312,12 @@ class NetworkPartitioner:
                 # Get induced subgraph
                 subgraph = self.network.subgraph(partition_nodes)
                 
-                # Create node list with attributes
+                # Nodes and edges are saved in a fixed order (iterating the subgraph follows string
+                # hashes, which differ between runs), so the same partition gives the same file
+                # and the primary network of the substation can be reused
                 nodelist = {}
-                for node, attrs in subgraph.nodes(data=True):
+                for node in sorted(subgraph.nodes, key=str):
+                    attrs = subgraph.nodes[node]
                     nodelist[str(node)] = {
                         "cord": attrs['cord'],
                         "label": attrs['label'],
@@ -317,7 +330,10 @@ class NetworkPartitioner:
                 
                 # Create edge list with attributes
                 edgelist = {}
-                for u, v, k, data in subgraph.edges(data=True, keys=True):
+                edges = (
+                    (*sorted((u, v), key=str), k, data) for u, v, k, data in subgraph.edges(data=True, keys=True)
+                )
+                for u, v, k, data in sorted(edges, key=lambda e: (str(e[0]), str(e[1]), e[2])):
                     edge_key = f"({u},{v},{k})"  # Create string key for JSON
                     edgelist[edge_key] = {
                         "highway": data.get('highway', 'unclassified'),

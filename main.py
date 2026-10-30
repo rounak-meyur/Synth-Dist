@@ -363,14 +363,20 @@ def check_secnet_complete(run, region):
 
 
 def clear_partition_outputs(run):
-    """Remove the partitioning and primary networks of the group (the substations may change)."""
-    if (run.partition_dir / "substations.txt").exists():
-        for sub_id in run.substations():
-            for path in run.primnet_files(sub_id):
-                path.unlink(missing_ok=True)
+    """
+    Remove the partitioning of the group. Returns the substations it had, whose primary
+    networks are kept: they are reused if the partition of their substation is unchanged.
+    """
+    old_substations = run.substations() if (run.partition_dir / "substations.txt").exists() else []
     shutil.rmtree(run.partition_dir, ignore_errors=True)
-    shutil.rmtree(f"{run.interim_dir}{run.group}_primnet", ignore_errors=True)
-    shutil.rmtree(f"{run.stats_dir}{run.group}_primnet", ignore_errors=True)
+    return old_substations
+
+
+def clear_primnet_outputs(run, sub_ids):
+    """Remove the primary networks, checkpoints and statistics of the given substations."""
+    for sub_id in sub_ids:
+        for path in [*run.primnet_files(sub_id), Path(run.primnet_manifest(sub_id)), Path(run.primnet_stats_file(sub_id))]:
+            path.unlink(missing_ok=True)
 
 
 def run_partition(run, checkpoints, stats):
@@ -408,7 +414,7 @@ def run_partition(run, checkpoints, stats):
             stage_stats["status"] = "reused"
         else:
             checkpoints.start("partition", partition_params)
-            clear_partition_outputs(run)
+            old_substations = clear_partition_outputs(run)
             homes = run.load_homes()
             subs = load_substations(file_path=input_sub_csv, homes=homes)
             if not subs:
@@ -429,7 +435,8 @@ def run_partition(run, checkpoints, stats):
             for sub in subs:
                 if str(sub.id) not in partition_data:
                     logger.info(f"No nodes mapped to the substation {sub.id}")
-            save_substation_partitions(partition_data, subs, run.partition_dir)
+            new_substations = save_substation_partitions(partition_data, subs, run.partition_dir)
+            clear_primnet_outputs(run, set(old_substations) - set(new_substations))
             stats_file.write_text(json.dumps(partition_stats(subs, partition_data), indent=2))
             checkpoints.complete("partition", partition_params)
 
@@ -497,6 +504,20 @@ def run_substation(run, sub_id):
             checkpoints.complete("primnet", primnet_params)
         stage_stats.update(primnet_stats({sub_id: pd.read_csv(edges_file).to_dict("records")}))
     stats.finish()
+
+
+def run_substations(run, sub_ids):
+    """Primary networks of the given substations, with a progress bar and a log line per substation."""
+    from tqdm import tqdm
+    from utils.logging_utils import LogManager, progress_logging
+    logger = LogManager.get_logger("__main__")
+    sub_ids = list(sub_ids)
+    with progress_logging():
+        for done, sub_id in enumerate(
+            tqdm(sub_ids, desc="Generating primary networks", unit="substation"), start=1
+        ):
+            run_substation(run, sub_id)
+            logger.info(f"Primary networks finished for {done} of {len(sub_ids)} substations")
 
 
 def summarize_primnet(run, stats):
@@ -648,8 +669,7 @@ def main(argv=None):
             run_region(run, region)
         return
     if stage == "primnet":
-        for sub_id in run.task_items():
-            run_substation(run, sub_id)
+        run_substations(run, run.task_items())
         return
 
     from utils.checkpoint_utils import CheckpointManager
@@ -674,8 +694,7 @@ def main(argv=None):
     if stage in ("all", "partition"):
         run_partition(run, checkpoints, stats)
     if stage == "all":
-        for sub_id in run.substations():
-            run_substation(run, sub_id)
+        run_substations(run, run.substations())
     if stage in ("all", "finalnet"):
         summarize_primnet(run, stats)
         run_finalnet(run, checkpoints, stats)
