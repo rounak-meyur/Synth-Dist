@@ -3,7 +3,7 @@ import logging
 import pytest
 
 from conftest import REPO_ROOT
-from utils.logging_utils import LogManager, add_run_separator, setup_logging
+from utils.logging_utils import DEFAULT_LOG_CONFIG, LogManager, add_run_separator, setup_logging
 
 LOG_CONFIG = str(REPO_ROOT / "configs/logging_config.ini")
 
@@ -18,6 +18,22 @@ def test_add_run_separator(tmp_path):
 def test_setup_logging_missing_config(tmp_path):
     with pytest.raises(FileNotFoundError):
         setup_logging(str(tmp_path / "app.log"), str(tmp_path / "missing.ini"))
+
+
+def test_default_log_config_is_shipped_config():
+    assert DEFAULT_LOG_CONFIG == REPO_ROOT / "configs/logging_config.ini"
+    assert DEFAULT_LOG_CONFIG.is_file()
+
+
+def test_log_manager_uses_default_config_from_any_directory(tmp_path, monkeypatch, restore_logging):
+    """Without a logging config path, the shipped one is used regardless of the working directory."""
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / "app.log"
+    LogManager.initialize(log_file_path=str(log))
+    LogManager.get_logger("default_config").info("default config works")
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+    assert "default config works" in log.read_text()
 
 
 def test_log_manager_writes_to_file(tmp_path, restore_logging):

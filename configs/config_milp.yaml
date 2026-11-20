@@ -3,6 +3,9 @@ inputs:
 
 miscellaneous:
   log_dir: "logs/"
+  # Logging configuration file (same as the --log-config flag); defaults to the
+  # configs/logging_config.ini shipped with the code, wherever main.py is run from
+  # log_config: "/path/to/logging_config.ini"
   intermediate_dir: "out/interim/"
   mapping_dir: "out/mapping/"
   stats_dir: "out/stats/"

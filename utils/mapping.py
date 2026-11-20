@@ -23,8 +23,7 @@ from utils.logging_utils import LogManager, progress_logging
 
 if __name__ == "__main__":
     LogManager.initialize(
-        log_file_path="logs/test_mapping.log", 
-        log_config_path="configs/logging_config.ini"
+        log_file_path="logs/test_mapping.log"
     )
 
 logger = LogManager.get_logger("mapping")

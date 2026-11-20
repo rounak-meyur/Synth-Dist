@@ -397,7 +397,10 @@ The program generates several output files:
 ## 🔍 Logging
 The project uses a comprehensive logging system:
 - Log files are stored in the `logs/` directory
-- Configuration in `configs/logging_config.ini`
+- Configuration in `configs/logging_config.ini`, found relative to the code, so `main.py` can be
+  run from any directory (e.g. a standalone instance directory outside the repository)
+- Use another logging configuration with `--log-config path/to/logging_config.ini` or
+  `miscellaneous.log_config` in the configuration file
 - Different log levels for console and file output
 - Automatic run separation in log files
 

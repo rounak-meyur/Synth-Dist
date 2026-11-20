@@ -67,6 +67,11 @@ def parse_args(argv=None):
         action = "store_true"
     )
     parser.add_argument(
+        "--log-config",
+        help = "path to logging configuration file (default: miscellaneous.log_config in the "
+               "config, else the configs/logging_config.ini shipped with the code)"
+    )
+    parser.add_argument(
         "-p", "--generate_plot",
         help = "generate plots",
         action = "store_true"
@@ -657,7 +662,7 @@ def main(argv=None):
     from utils.logging_utils import LogManager
     LogManager.initialize(
         log_file_path=f"{conf['miscellaneous']['log_dir']}application_{run.label}.log",
-        log_config_path="configs/logging_config.ini"
+        log_config_path=args.log_config or conf["miscellaneous"].get("log_config"),
     )
     logger = LogManager.get_logger("__main__")
     logger.info(f"Running stage '{stage}' for group {run.group} with regions {run.regions}")

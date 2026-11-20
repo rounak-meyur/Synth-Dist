@@ -88,7 +88,6 @@ def main(argv=None):
 if __name__ == "__main__":
     LogManager.initialize(
         log_file_path=str(REPO_ROOT / "logs/csv_downloader.log"),
-        log_config_path=str(REPO_ROOT / "configs/logging_config.ini")
     )
 logger = LogManager.get_logger("downloader")
 
