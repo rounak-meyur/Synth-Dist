@@ -9,8 +9,7 @@ from utils.logging_utils import LogManager
 
 if __name__ == "__main__":
     LogManager.initialize(
-        log_file_path="logs/test_osm_utils.log", 
-        log_config_path="configs/logging_config.ini"
+        log_file_path="logs/test_osm_utils.log"
     )
 logger = LogManager.get_logger("dataloader")
 

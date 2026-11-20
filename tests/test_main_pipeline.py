@@ -98,8 +98,8 @@ class Pipeline:
         """Run main.py with `args` (stage first, if any); returns the log of this run."""
         config_path = self.base / "config.yaml"
         OmegaConf.save(self.conf, config_path)
-        # main.py reads configs/logging_config.ini relative to the working directory
-        self.monkeypatch.chdir(REPO_ROOT)
+        # run outside the repository: main.py must not depend on the working directory
+        self.monkeypatch.chdir(self.base)
         self.monkeypatch.setattr(
             sys, "argv", ["main.py", *args, "-c", str(config_path), "-g", str(self.group_file)]
         )
@@ -731,3 +731,18 @@ def test_main_requires_home_directory_in_group_config(pair):
     OmegaConf.save(group, pair.group_file)
     with pytest.raises(SystemExit, match="must set the directory of the home load files"):
         pair.run(no_osm())
+
+
+@pytest.mark.parametrize("use_flag", [True, False], ids=["--log-config", "config key"])
+def test_main_custom_logging_config(pipeline, road_grid, use_flag):
+    """A logging config given with --log-config or miscellaneous.log_config replaces the shipped one."""
+    custom = pipeline.base / "custom_logging.ini"
+    text = (REPO_ROOT / "configs/logging_config.ini").read_text()
+    custom.write_text(text.replace("format=%(asctime)", "format=CUSTOM %(asctime)"))
+    args = ["secnet"]
+    if use_flag:
+        args += ["--log-config", str(custom)]
+    else:
+        pipeline.conf.miscellaneous.log_config = str(custom)
+    log = pipeline.run(MagicMock(return_value=road_grid), *args)
+    assert "CUSTOM" in log and "Running stage 'secnet'" in log

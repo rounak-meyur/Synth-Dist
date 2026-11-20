@@ -13,6 +13,10 @@ from contextlib import contextmanager
 
 from tqdm.contrib.logging import logging_redirect_tqdm
 
+# Logging configuration shipped with the code; used unless another file is given, so the
+# pipeline can be run from any working directory
+DEFAULT_LOG_CONFIG = Path(__file__).resolve().parent.parent / "configs" / "logging_config.ini"
+
 
 class ReopeningFileHandler(logging.FileHandler):
     """
@@ -62,15 +66,16 @@ def add_run_separator(log_file_path: str):
     with open(log_file_path, 'a') as log_file:
         log_file.write(f"{separator}{run_header}{separator}\n")
 
-def setup_logging(log_file_path: str, log_config_path: str) -> None:
+def setup_logging(log_file_path: str, log_config_path: str = None) -> None:
     """
     Set up logging configuration for the project using logging_config.ini.
 
     Args:
         log_file_path (str): Path to the log file
-        log_config_path (str): Path to the log configuration file
+        log_config_path (str, optional): Path to the log configuration file
+            (default: DEFAULT_LOG_CONFIG)
     """
-    # Path to the logging config file
+    log_config_path = str(log_config_path or DEFAULT_LOG_CONFIG)
     print(f"Reading logging config from: {log_config_path}")
     if not Path(log_config_path).exists():
         raise FileNotFoundError(f"Logging config file not found: {log_config_path}")
@@ -123,13 +128,14 @@ class LogManager:
         return cls._instance
 
     @classmethod
-    def initialize(cls, log_file_path: str, log_config_path: str):
+    def initialize(cls, log_file_path: str, log_config_path: str = None):
         """
         Initialize the LogManager with the log file path.
         
         Args:
             log_file_path (str): Path to the log file.
-            log_config_path (str): Path to the log configuration file.
+            log_config_path (str, optional): Path to the log configuration file
+                (default: DEFAULT_LOG_CONFIG).
         """
         cls._log_file_path = log_file_path
         setup_logging(log_file_path, log_config_path)
@@ -161,9 +167,8 @@ class LogManager:
 if __name__ == "__main__":
     # This is just for demonstration. In real use, the log_file_path
     # should be read from config.yaml in the main script.
-    log_config = 'configs/logging_config.ini'
     example_log_path = "logs/test_logutils.log"
-    LogManager.initialize(example_log_path, log_config)
+    LogManager.initialize(example_log_path)
     
     logger1 = LogManager.get_logger()  # Will use '__main__' as the logger name
     logger2 = LogManager.get_logger("custom_name")

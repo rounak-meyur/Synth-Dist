@@ -24,8 +24,7 @@ SECNET_METHODS = ("milp", "heuristic")
 
 if __name__ == "__main__":
     LogManager.initialize(
-        log_file_path="logs/test_secnet_utils.log", 
-        log_config_path="configs/logging_config.ini"
+        log_file_path="logs/test_secnet_utils.log"
     )
 
 logger = LogManager.get_logger("secnet_utils")
